@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import ImageUploader from '../components/ImageUploader'
 import { renderMarkdown } from '../lib/markdown'
+import Icon from '../components/Icon'
 import './NewPost.css'
 
 export default function NewPost() {
@@ -28,39 +29,34 @@ export default function NewPost() {
 
   return (
     <div className="new-post">
-      <h2>New Post</h2>
+      <h2><Icon name="plus" size={20} /> 新しい日記</h2>
       <form className="card post-form" onSubmit={submit}>
-        <input
-          placeholder="Title"
-          value={title}
-          onChange={e => setTitle(e.target.value)}
-          required
-          autoFocus
-        />
+        <input placeholder="タイトル" value={title} onChange={e => setTitle(e.target.value)} required autoFocus />
         <div className="editor-tabs">
-          <button type="button" className={!preview ? 'active' : ''} onClick={() => setPreview(false)}>Write</button>
-          <button type="button" className={preview ? 'active' : ''} onClick={() => setPreview(true)}>Preview</button>
+          <button type="button" className={!preview ? 'active' : ''} onClick={() => setPreview(false)}>
+            <Icon name="edit" size={14} />書く
+          </button>
+          <button type="button" className={preview ? 'active' : ''} onClick={() => setPreview(true)}>
+            <Icon name="eye" size={14} />プレビュー
+          </button>
         </div>
         {preview ? (
           <div className="post-body preview-box" dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />
         ) : (
-          <textarea
-            placeholder="Write in Markdown..."
-            value={body}
-            onChange={e => setBody(e.target.value)}
-            rows={10}
-            required
-          />
+          <textarea placeholder="Markdownで日記を書こう..." value={body} onChange={e => setBody(e.target.value)} rows={10} required />
         )}
-        <ImageUploader onInsert={(url) => setBody(b => b + `\n![image](${url})`)} />
+        <ImageUploader onInsert={(url) => setBody(b => b + `\n![画像](${url})`)} />
         <div className="form-footer">
-          <select value={visibility} onChange={e => setVisibility(e.target.value)}>
-            <option value="public">Public</option>
-            <option value="private">Private</option>
-            <option value="draft">Draft</option>
-          </select>
+          <div className="visibility-select">
+            <Icon name={visibility === 'public' ? 'eye' : visibility === 'private' ? 'eye-off' : 'draft'} size={16} />
+            <select value={visibility} onChange={e => setVisibility(e.target.value)}>
+              <option value="public">全員に公開</option>
+              <option value="private">自分のみ</option>
+              <option value="draft">下書き</option>
+            </select>
+          </div>
           <button type="submit" className="primary" disabled={submitting}>
-            {submitting ? 'Posting...' : 'Post'}
+            <Icon name="send" size={16} />{submitting ? '投稿中...' : '投稿する'}
           </button>
         </div>
       </form>

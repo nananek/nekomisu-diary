@@ -1,4 +1,4 @@
-.new-post h2 { margin-bottom: 16px; }
+.new-post h2 { margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
 
 .post-form {
   display: flex;
@@ -14,7 +14,14 @@
   justify-content: space-between;
   gap: 12px;
 }
-.form-footer select { width: auto; }
+
+.visibility-select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+}
+.visibility-select select { width: auto; min-height: auto; padding: 6px 10px; }
 
 .editor-tabs {
   display: flex;
@@ -24,11 +31,15 @@
 .editor-tabs button {
   border: none;
   background: none;
-  padding: 6px 16px;
+  padding: 8px 16px;
   font-size: 14px;
   cursor: pointer;
   border-bottom: 2px solid transparent;
   color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: auto;
 }
 .editor-tabs button.active {
   border-bottom-color: var(--accent);

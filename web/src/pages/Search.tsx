@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../api'
 import type { Post } from '../api'
+import Icon from '../components/Icon'
 
 export default function Search() {
   const [query, setQuery] = useState('')
@@ -13,43 +14,27 @@ export default function Search() {
     e.preventDefault()
     if (!query.trim()) return
     setLoading(true)
-    try {
-      const d = await api.search(query)
-      setResults(d.posts)
-      setSearched(true)
-    } finally {
-      setLoading(false)
-    }
+    try { const d = await api.search(query); setResults(d.posts); setSearched(true) }
+    finally { setLoading(false) }
   }
 
   return (
     <div className="timeline">
-      <h2>Search</h2>
+      <h2><Icon name="search" size={20} /> 検索</h2>
       <form onSubmit={submit} style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <input
-          placeholder="Search posts..."
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          style={{ flex: 1 }}
-          autoFocus
-        />
-        <button type="submit" className="primary" disabled={loading}>Search</button>
+        <input placeholder="日記を検索..." value={query} onChange={e => setQuery(e.target.value)} style={{ flex: 1 }} autoFocus />
+        <button type="submit" className="primary" disabled={loading}><Icon name="search" size={16} /></button>
       </form>
-      {loading && <div className="loading">Searching...</div>}
-      {searched && !loading && results.length === 0 && <p>No results.</p>}
+      {loading && <div className="loading">検索中...</div>}
+      {searched && !loading && results.length === 0 && <p className="empty">見つかりませんでした</p>}
       {results.map(p => (
         <article key={p.id} className="post-card card">
           <div className="post-header">
             <div className="post-author">
-              {p.author_avatar
-                ? <img className="avatar" src={p.author_avatar} alt="" />
-                : <span className="avatar placeholder">{p.author_name[0]}</span>
-              }
+              {p.author_avatar ? <img className="avatar" src={p.author_avatar} alt="" /> : <span className="avatar placeholder">{p.author_name[0]}</span>}
               <span className="author-name">{p.author_name}</span>
             </div>
-            <span className="meta">
-              {p.published_at && new Date(p.published_at).toLocaleDateString('ja-JP')}
-            </span>
+            <span className="meta">{p.published_at && new Date(p.published_at).toLocaleDateString('ja-JP')}</span>
           </div>
           <Link to={`/posts/${p.id}`} className="post-title-link"><h3>{p.title}</h3></Link>
         </article>

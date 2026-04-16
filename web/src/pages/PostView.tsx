@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api } from '../api'
 import type { Post, Comment } from '../api'
 import { useAuth } from '../App'
+import Icon from '../components/Icon'
 import './PostView.css'
 
 export default function PostView() {
@@ -13,7 +14,6 @@ export default function PostView() {
   const [comments, setComments] = useState<Comment[]>([])
   const [newComment, setNewComment] = useState('')
   const [replyTo, setReplyTo] = useState<number | null>(null)
-
   const postId = Number(id)
 
   useEffect(() => {
@@ -38,12 +38,12 @@ export default function PostView() {
   }
 
   const deletePost = async () => {
-    if (!confirm('Delete this post?')) return
+    if (!confirm('この日記を削除しますか？')) return
     await api.deletePost(postId)
     nav('/')
   }
 
-  if (!post) return <div className="loading">Loading...</div>
+  if (!post) return <div className="loading">読み込み中...</div>
 
   const topLevel = comments.filter(c => !c.parent_id)
   const replies = (parentId: number) => comments.filter(c => c.parent_id === parentId)
@@ -52,7 +52,7 @@ export default function PostView() {
     <div className="post-view">
       <article className="card">
         <div className="pv-header">
-          <div className="post-author">
+          <Link to={`/members/${post.author_id}`} className="post-author">
             {post.author_avatar
               ? <img className="avatar" src={post.author_avatar} alt="" />
               : <span className="avatar placeholder">{post.author_name[0]}</span>
@@ -61,11 +61,11 @@ export default function PostView() {
             <span className="meta">
               {post.published_at && new Date(post.published_at).toLocaleDateString('ja-JP')}
             </span>
-          </div>
+          </Link>
           {user?.id === post.author_id && (
-            <div style={{ display: 'flex', gap: 8 }}>
-              <Link to={`/posts/${post.id}/edit`} className="btn">Edit</Link>
-              <button className="danger" onClick={deletePost}>Delete</button>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <Link to={`/posts/${post.id}/edit`} className="btn"><Icon name="edit" size={16} />編集</Link>
+              <button className="danger" onClick={deletePost}><Icon name="trash" size={16} /></button>
             </div>
           )}
         </div>
@@ -74,13 +74,13 @@ export default function PostView() {
       </article>
 
       <section className="comments-section">
-        <h3>Comments ({comments.length})</h3>
+        <h3><Icon name="comment" size={18} /> コメント ({comments.length})</h3>
         {topLevel.map(c => (
           <div key={c.id} className="comment-thread">
             <CommentItem c={c} onReply={setReplyTo} onDelete={deleteComment} activeReply={replyTo} currentUserId={user?.id ?? 0} />
             {replies(c.id).map(r => (
               <div key={r.id} className="comment-reply">
-                <CommentItem c={r} onReply={setReplyTo} activeReply={replyTo} />
+                <CommentItem c={r} onReply={setReplyTo} onDelete={deleteComment} activeReply={replyTo} currentUserId={user?.id ?? 0} />
               </div>
             ))}
           </div>
@@ -88,35 +88,19 @@ export default function PostView() {
         <form className="comment-form" onSubmit={submitComment}>
           {replyTo && (
             <p className="meta">
-              Replying to #{replyTo}{' '}
-              <a href="#" onClick={e => { e.preventDefault(); setReplyTo(null) }}>cancel</a>
+              返信中 <a href="#" onClick={e => { e.preventDefault(); setReplyTo(null) }}>キャンセル</a>
             </p>
           )}
-          <textarea
-            placeholder="Write a comment..."
-            value={newComment}
-            onChange={e => setNewComment(e.target.value)}
-            rows={3}
-          />
-          <button type="submit" className="primary">Comment</button>
+          <textarea placeholder="コメントを書く..." value={newComment} onChange={e => setNewComment(e.target.value)} rows={3} />
+          <button type="submit" className="primary"><Icon name="send" size={16} />送信</button>
         </form>
       </section>
     </div>
   )
 }
 
-function CommentItem({
-  c,
-  onReply,
-  onDelete,
-  activeReply,
-  currentUserId,
-}: {
-  c: Comment
-  onReply: (id: number) => void
-  onDelete: (id: number) => void
-  activeReply: number | null
-  currentUserId: number
+function CommentItem({ c, onReply, onDelete, activeReply, currentUserId }: {
+  c: Comment; onReply: (id: number) => void; onDelete: (id: number) => void; activeReply: number | null; currentUserId: number
 }) {
   return (
     <div className={`comment card ${activeReply === c.id ? 'replying' : ''}`}>
@@ -129,10 +113,10 @@ function CommentItem({
           <span className="author-name">{c.author_name}</span>
           <span className="meta">{new Date(c.created_at).toLocaleDateString('ja-JP')}</span>
         </div>
-        <div style={{ display: 'flex', gap: 4 }}>
-          <button className="reply-btn" onClick={() => onReply(c.id)}>Reply</button>
+        <div style={{ display: 'flex', gap: 2 }}>
+          <button className="ghost" onClick={() => onReply(c.id)} title="返信"><Icon name="reply" size={14} /></button>
           {c.author_id === currentUserId && (
-            <button className="reply-btn danger" onClick={() => onDelete(c.id)}>Del</button>
+            <button className="ghost" onClick={() => onDelete(c.id)} title="削除" style={{ color: 'var(--danger)' }}><Icon name="trash" size={14} /></button>
           )}
         </div>
       </div>

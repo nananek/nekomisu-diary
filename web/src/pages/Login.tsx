@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../App'
 import { api } from '../api'
 import type { LoginResult } from '../api'
+import Icon from '../components/Icon'
 import './Login.css'
 
 export default function Login() {
@@ -60,8 +61,7 @@ export default function Login() {
         ...options.publicKey,
         challenge: base64urlToBuffer(options.publicKey.challenge),
         allowCredentials: options.publicKey.allowCredentials?.map((c: any) => ({
-          ...c,
-          id: base64urlToBuffer(c.id),
+          ...c, id: base64urlToBuffer(c.id),
         })),
       }
       const assertion = await navigator.credentials.get({ publicKey }) as PublicKeyCredential
@@ -84,7 +84,7 @@ export default function Login() {
         nav('/')
       }
     } catch (err: any) {
-      setError(err.message || 'WebAuthn failed')
+      setError(err.message || '認証に失敗しました')
     }
   }
 
@@ -92,30 +92,21 @@ export default function Login() {
     return (
       <div className="login-page">
         <div className="login-card card">
-          <h1>Two-Factor Auth</h1>
+          <h1><Icon name="shield" size={28} /> 二段階認証</h1>
           {twoFAInfo.has_totp && (
             <form onSubmit={submitTOTP}>
-              <input
-                placeholder="6-digit TOTP code"
-                value={totpCode}
-                onChange={e => setTotpCode(e.target.value)}
-                autoFocus
-                maxLength={6}
-                pattern="[0-9]{6}"
-              />
+              <input placeholder="6桁の認証コード" value={totpCode} onChange={e => setTotpCode(e.target.value)} autoFocus maxLength={6} pattern="[0-9]{6}" inputMode="numeric" />
               {error && <p className="error">{error}</p>}
-              <button type="submit" className="primary" style={{ width: '100%' }}>Verify</button>
+              <button type="submit" className="primary" style={{ width: '100%' }}><Icon name="check" size={18} />確認</button>
             </form>
           )}
           {twoFAInfo.has_webauthn && (
-            <div style={{ marginTop: 16 }}>
-              <button onClick={loginWebAuthn} style={{ width: '100%' }}>
-                Use Security Key
-              </button>
-            </div>
+            <button onClick={loginWebAuthn} style={{ width: '100%', marginTop: 12 }}>
+              <Icon name="key" size={18} />セキュリティキーを使う
+            </button>
           )}
           <p className="switch-mode">
-            <a href="#" onClick={e => { e.preventDefault(); setMode('login'); setError('') }}>Back to login</a>
+            <a href="#" onClick={e => { e.preventDefault(); setMode('login'); setError('') }}>ログインに戻る</a>
           </p>
         </div>
       </div>
@@ -125,58 +116,41 @@ export default function Login() {
   return (
     <div className="login-page">
       <div className="login-card card">
-        <h1>Exchange Diary</h1>
+        <h1>交換日記</h1>
         <form onSubmit={submit}>
-          <input
-            placeholder="Login ID"
-            value={login}
-            onChange={e => setLogin(e.target.value)}
-            required
-            autoFocus
-          />
+          <input placeholder="ログインID" value={login} onChange={e => setLogin(e.target.value)} required autoFocus />
           {mode === 'register' && (
             <>
-              <input placeholder="Email" type="email" value={email} onChange={e => setEmail(e.target.value)} required />
-              <input placeholder="Display Name" value={displayName} onChange={e => setDisplayName(e.target.value)} required />
+              <input placeholder="メールアドレス" type="email" value={email} onChange={e => setEmail(e.target.value)} required />
+              <input placeholder="表示名" value={displayName} onChange={e => setDisplayName(e.target.value)} required />
             </>
           )}
-          <input
-            placeholder="Password"
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            required
-          />
+          <input placeholder="パスワード" type="password" value={password} onChange={e => setPassword(e.target.value)} required />
           {error && <p className="error">{error}</p>}
           <button type="submit" className="primary" style={{ width: '100%' }}>
-            {mode === 'login' ? 'Login' : 'Register'}
+            {mode === 'login' ? <><Icon name="lock" size={18} />ログイン</> : <><Icon name="user" size={18} />登録</>}
           </button>
         </form>
         <p className="switch-mode">
-          {mode === 'login' ? (
-            <>New here? <a href="#" onClick={e => { e.preventDefault(); setMode('register') }}>Register</a></>
-          ) : (
-            <>Have an account? <a href="#" onClick={e => { e.preventDefault(); setMode('login') }}>Login</a></>
-          )}
+          {mode === 'login'
+            ? <>はじめての方は<a href="#" onClick={e => { e.preventDefault(); setMode('register') }}>新規登録</a></>
+            : <>アカウントをお持ちの方は<a href="#" onClick={e => { e.preventDefault(); setMode('login') }}>ログイン</a></>
+          }
         </p>
       </div>
     </div>
   )
 }
 
-// WebAuthn helpers
-function base64urlToBuffer(base64url: string): ArrayBuffer {
-  const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/')
-  const pad = base64.length % 4 === 0 ? '' : '='.repeat(4 - (base64.length % 4))
-  const binary = atob(base64 + pad)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  return bytes.buffer
+function base64urlToBuffer(b: string): ArrayBuffer {
+  const s = b.replace(/-/g, '+').replace(/_/g, '/');
+  const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
+  const bin = atob(s + pad); const a = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
+  return a.buffer;
 }
-
-function bufferToBase64url(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer)
-  let binary = ''
-  for (const b of bytes) binary += String.fromCharCode(b)
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+function bufferToBase64url(buf: ArrayBuffer): string {
+  const a = new Uint8Array(buf); let s = '';
+  for (const b of a) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import ImageUploader from '../components/ImageUploader'
+import Icon from '../components/Icon'
 import './NewPost.css'
 
 export default function EditPost() {
@@ -33,27 +34,29 @@ export default function EditPost() {
     }
   }
 
-  if (loading) return <div className="loading">Loading...</div>
+  if (loading) return <div className="loading">読み込み中...</div>
 
   return (
     <div className="new-post">
-      <h2>Edit Post</h2>
+      <h2><Icon name="edit" size={20} /> 日記を編集</h2>
       <form className="card post-form" onSubmit={submit}>
         <input value={title} onChange={e => setTitle(e.target.value)} required />
         <textarea value={body} onChange={e => setBody(e.target.value)} rows={10} required />
         <ImageUploader onInsert={(url) => setBody(b => b + `\n<img src="${url}" />`)} />
         <div className="form-footer">
-          <select value={visibility} onChange={e => setVisibility(e.target.value)}>
-            <option value="public">Public</option>
-            <option value="private">Private</option>
-            <option value="draft">Draft</option>
-          </select>
+          <div className="visibility-select">
+            <Icon name={visibility === 'public' ? 'eye' : visibility === 'private' ? 'eye-off' : 'draft'} size={16} />
+            <select value={visibility} onChange={e => setVisibility(e.target.value)}>
+              <option value="public">全員に公開</option>
+              <option value="private">自分のみ</option>
+              <option value="draft">下書き</option>
+            </select>
+          </div>
           <button type="submit" className="primary" disabled={submitting}>
-            {submitting ? 'Saving...' : 'Save'}
+            <Icon name="check" size={16} />{submitting ? '保存中...' : '保存する'}
           </button>
         </div>
       </form>
     </div>
   )
 }
-

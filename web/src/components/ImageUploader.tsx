@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api } from '../api'
+import Icon from './Icon'
 
 export default function ImageUploader({ onInsert }: { onInsert: (url: string) => void }) {
   const [uploading, setUploading] = useState(false)
@@ -20,7 +21,7 @@ export default function ImageUploader({ onInsert }: { onInsert: (url: string) =>
   return (
     <label style={{ cursor: 'pointer' }}>
       <input type="file" accept="image/*" onChange={upload} style={{ display: 'none' }} />
-      <span className="btn">{uploading ? 'Uploading...' : 'Insert Image'}</span>
+      <span className="btn"><Icon name="image" size={16} />{uploading ? 'アップロード中...' : '画像を挿入'}</span>
     </label>
   )
 }

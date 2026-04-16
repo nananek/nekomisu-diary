@@ -1,17 +1,6 @@
 # Production compose for Exchange Diary
-# Runs behind Tailscale (HTTPS terminated by Tailscale's built-in cert)
-#
-# Usage:
-#   docker compose -f compose.prod.yml up -d
-#
-# Prerequisites:
-#   1. Build the Go server: go build -o bin/server ./cmd/server/
-#   2. Build the frontend: cd web && npm run build
-#   3. Copy uploads/ directory with media files
-#   4. Set TS_AUTHKEY in .env (or via environment)
-#
-# The server listens on :3000 inside the Tailscale network.
-# Access via https://<tailscale-hostname>:3000 or configure Tailscale Serve.
+# Reuses the original WordPress Tailscale state → wordpress.tail2c8c7.ts.net
+# All services share Tailscale's network namespace, communicate on 127.0.0.1.
 
 name: diary-prod
 
@@ -19,7 +8,6 @@ services:
   tailscale:
     image: tailscale/tailscale:latest
     restart: unless-stopped
-    hostname: diary
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -27,53 +15,46 @@ services:
       - TS_STATE_DIR=/var/lib/tailscale
       - TS_EXTRA_ARGS=--advertise-exit-node=false
       - TS_SERVE_CONFIG=/config/serve.json
-      - TS_AUTHKEY=${TS_AUTHKEY:-}
     volumes:
-      - ts-state:/var/lib/tailscale
+      - /home/kts_sz/wp/mnt/docker/wordpress/tailscale_state:/var/lib/tailscale
       - ./tailscale-serve.json:/config/serve.json:ro
       - /dev/net/tun:/dev/net/tun
 
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    depends_on:
+      - tailscale
     environment:
       - POSTGRES_DB=diary
       - POSTGRES_USER=diary
-      - POSTGRES_PASSWORD=${PG_PASSWORD:-diary_prod_pw}
+      - POSTGRES_PASSWORD=${PG_PASSWORD}
       - POSTGRES_INITDB_ARGS=--locale=C.UTF-8 --encoding=UTF8
     volumes:
       - pg-data:/var/lib/postgresql/data
       - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-    networks:
-      - internal
+      - ./tools/seed-data.sql:/docker-entrypoint-initdb.d/02-seed-data.sql:ro
+    network_mode: "service:tailscale"
 
   server:
-    image: golang:1.24-alpine
+    image: alpine:latest
     restart: unless-stopped
     depends_on:
       - postgres
       - tailscale
     entrypoint: ["/app/bin/server"]
     command:
-      - -pg=postgres://diary:${PG_PASSWORD:-diary_prod_pw}@postgres:5432/diary?sslmode=disable
+      - -pg=postgres://diary:${PG_PASSWORD}@127.0.0.1:5432/diary?sslmode=disable
       - -addr=:3000
       - -uploads=/app/uploads
       - -web=/app/web/dist
-      - -rp-id=${RP_ID:-diary}
-      - -rp-origin=${RP_ORIGIN:-https://diary}
-    environment:
-      - GOTOOLCHAIN=auto
+      - -rp-id=${RP_ID}
+      - -rp-origin=${RP_ORIGIN}
     volumes:
       - ./bin/server:/app/bin/server:ro
       - ./web/dist:/app/web/dist:ro
       - ./uploads:/app/uploads
     network_mode: "service:tailscale"
 
-networks:
-  internal:
-    driver: bridge
-    internal: true
-
 volumes:
-  ts-state:
   pg-data:

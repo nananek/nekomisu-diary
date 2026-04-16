@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { api } from '../api'
 import type { Post, Member } from '../api'
+import Icon from '../components/Icon'
 
 export default function MemberPosts() {
   const { userId } = useParams()
@@ -12,20 +13,8 @@ export default function MemberPosts() {
   const [pages, setPages] = useState(1)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    api.members().then(d => {
-      const m = d.members.find(m => m.id === uid)
-      if (m) setMember(m)
-    })
-  }, [uid])
-
-  useEffect(() => {
-    setLoading(true)
-    api.userPosts(uid, page).then(d => {
-      setPosts(d.posts)
-      setPages(d.pages)
-    }).finally(() => setLoading(false))
-  }, [uid, page])
+  useEffect(() => { api.members().then(d => { const m = d.members.find(m => m.id === uid); if (m) setMember(m) }) }, [uid])
+  useEffect(() => { setLoading(true); api.userPosts(uid, page).then(d => { setPosts(d.posts); setPages(d.pages) }).finally(() => setLoading(false)) }, [uid, page])
 
   return (
     <div className="timeline">
@@ -37,31 +26,33 @@ export default function MemberPosts() {
           }
           <div>
             <h2 style={{ margin: 0 }}>{member.display_name}</h2>
-            <span className="meta">@{member.login} &middot; {member.post_count} posts</span>
+            <span className="meta"><Icon name="draft" size={12} /> {member.post_count}件の日記</span>
           </div>
         </div>
       )}
-      {loading ? <div className="loading">Loading...</div> : (
+      {loading ? <div className="loading">読み込み中...</div> : (
         <>
-          {posts.length === 0 && <p>No posts.</p>}
+          {posts.length === 0 && <p className="empty">まだ日記がありません</p>}
           {posts.map(p => (
             <article key={p.id} className="post-card card">
               <div className="post-header">
                 <span className="meta">
                   {p.published_at && new Date(p.published_at).toLocaleDateString('ja-JP')}
-                  {p.visibility === 'private' && ' (private)'}
+                  {p.visibility === 'private' && ' (自分のみ)'}
                 </span>
               </div>
               <Link to={`/posts/${p.id}`} className="post-title-link"><h3>{p.title}</h3></Link>
               <div className="post-excerpt" dangerouslySetInnerHTML={{ __html: p.body_html.slice(0, 200) }} />
-              <span className="meta">{p.comment_count > 0 && `${p.comment_count} comments`}</span>
+              <span className="meta footer-link">
+                {p.comment_count > 0 && <><Icon name="comment" size={12} /> {p.comment_count}件</>}
+              </span>
             </article>
           ))}
           {pages > 1 && (
             <div className="pagination">
-              <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>Prev</button>
+              <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}>前へ</button>
               <span className="meta">{page} / {pages}</span>
-              <button disabled={page >= pages} onClick={() => setPage(p => p + 1)}>Next</button>
+              <button disabled={page >= pages} onClick={() => setPage(p => p + 1)}>次へ</button>
             </div>
           )}
         </>

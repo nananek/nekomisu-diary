@@ -1,4 +1,5 @@
-:root {
+/* Theme: auto-detect by default, overridden by data-theme attribute */
+:root, [data-theme="light"] {
   --text: #4a4458;
   --text-h: #1a1625;
   --bg: #faf9fc;
@@ -7,14 +8,29 @@
   --accent: #7c5cbf;
   --accent-light: #ede8f5;
   --danger: #d94f5c;
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --success: #2d9d5e;
+  --sans: system-ui, 'Segoe UI', Roboto, 'Hiragino Sans', 'Noto Sans JP', sans-serif;
   --mono: ui-monospace, Consolas, monospace;
-  --radius: 8px;
+  --radius: 10px;
   --max-w: 680px;
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --text: #b0a8be;
+  --text-h: #eee8f5;
+  --bg: #141118;
+  --surface: #1e1a24;
+  --border: #302a3a;
+  --accent: #a88be0;
+  --accent-light: #2a2035;
+  --danger: #e87c85;
+  --success: #5dd992;
+  color-scheme: dark;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --text: #b0a8be;
     --text-h: #eee8f5;
     --bg: #141118;
@@ -23,15 +39,18 @@
     --accent: #a88be0;
     --accent-light: #2a2035;
     --danger: #e87c85;
+    --success: #5dd992;
+    color-scheme: dark;
   }
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  font: 16px/1.6 var(--sans);
+  font: 15px/1.7 var(--sans);
   color: var(--text);
   background: var(--bg);
+  -webkit-tap-highlight-color: transparent;
 }
 
 a { color: var(--accent); text-decoration: none; }
@@ -40,32 +59,38 @@ a:hover { text-decoration: underline; }
 h1, h2, h3 { color: var(--text-h); font-weight: 600; }
 
 button, .btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 16px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--text-h);
   font: inherit; cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
 }
 button:hover, .btn:hover {
   border-color: var(--accent);
   background: var(--accent-light);
 }
+button:active, .btn:active { transform: scale(0.97); }
 button.primary, .btn.primary {
   background: var(--accent);
   color: #fff;
   border-color: var(--accent);
 }
-button.primary:hover, .btn.primary:hover {
-  opacity: 0.9;
-}
+button.primary:hover, .btn.primary:hover { opacity: 0.9; }
 button.danger { color: var(--danger); border-color: var(--danger); }
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+  padding: 6px;
+}
+button.ghost:hover { background: var(--accent-light); border-color: transparent; }
 
 input, textarea, select {
   font: inherit;
-  padding: 8px 12px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
@@ -82,7 +107,7 @@ textarea { resize: vertical; min-height: 120px; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 20px;
+  padding: 16px;
 }
 
 .loading { text-align: center; padding: 60px; color: var(--text); }
@@ -93,27 +118,29 @@ textarea { resize: vertical; min-height: 120px; }
   object-fit: cover;
   background: var(--accent-light);
 }
-
-.meta { font-size: 14px; color: var(--text); }
-
-/* Mobile touch targets */
-@media (max-width: 640px) {
-  .card { padding: 16px; }
-  button, .btn { padding: 10px 16px; min-height: 44px; }
-  input, textarea, select { padding: 10px 12px; min-height: 44px; font-size: 16px; }
-  h1 { font-size: 22px; }
-  h2 { font-size: 20px; }
-  h3 { font-size: 17px; }
-
-  /* Prevent zoom on iOS input focus */
-  input[type="text"], input[type="password"], input[type="email"], textarea, select {
-    font-size: 16px;
-  }
+.avatar.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: var(--accent);
 }
 
-/* Standalone PWA: extra top padding for status bar */
+.meta { font-size: 13px; color: var(--text); }
+.success { color: var(--success); font-size: 13px; }
+.error { color: var(--danger); font-size: 13px; }
+
+/* Mobile */
+@media (max-width: 640px) {
+  body { font-size: 15px; }
+  .card { padding: 14px; }
+  button, .btn { padding: 10px 14px; min-height: 44px; }
+  input, textarea, select { padding: 10px 12px; min-height: 44px; font-size: 16px; }
+  h1 { font-size: 22px; }
+  h2 { font-size: 19px; }
+  h3 { font-size: 16px; }
+}
+
 @media (display-mode: standalone) {
-  .topbar {
-    padding-top: env(safe-area-inset-top, 12px);
-  }
+  .topbar { padding-top: env(safe-area-inset-top, 12px); }
 }
