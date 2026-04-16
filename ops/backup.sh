@@ -10,7 +10,7 @@
 #   ./ops/backup.sh
 #
 # cron 例:
-#   0 3 * * * /home/kts_sz/wp/diary/ops/backup.sh
+#   0 3 * * * /path/to/diary/ops/backup.sh
 
 set -eu
 

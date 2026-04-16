@@ -423,8 +423,10 @@ type loginModel struct {
 
 func newLoginModel() loginModel {
 	urlInput := textinput.New()
-	urlInput.Placeholder = "https://wordpress.tail2c8c7.ts.net"
-	urlInput.SetValue("https://wordpress.tail2c8c7.ts.net")
+	urlInput.Placeholder = "https://diary.example.com"
+	if v := os.Getenv("DIARY_URL"); v != "" {
+		urlInput.SetValue(v)
+	}
 	urlInput.Focus()
 
 	li := textinput.New()

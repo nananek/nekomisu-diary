@@ -37,10 +37,12 @@ mkdir -p "$WORK/${BUNDLE_NAME}"
 STAGE="$WORK/${BUNDLE_NAME}"
 
 echo "==> refreshing static binaries"
-WP_COMPOSE=/home/kts_sz/wp/mnt/docker/wordpress/compose.dev.yml
-docker compose -f "$WP_COMPOSE" exec -T \
-  -e GOTOOLCHAIN=auto -e CGO_ENABLED=0 godev \
-  sh -c "cd /app && go build -ldflags='-s -w' -o bin/server ./cmd/server/ && go build -ldflags='-s -w' -o bin/passwdreset ./cmd/passwdreset/ && go build -ldflags='-s -w' -o bin/diary-tui ./cmd/diary-tui/"
+# Build in a throwaway golang container to avoid requiring Go on the host.
+docker run --rm \
+  -v "$ROOT":/app -w /app \
+  -e GOTOOLCHAIN=auto -e CGO_ENABLED=0 \
+  golang:1.24-alpine \
+  sh -c "go build -ldflags='-s -w' -o bin/server ./cmd/server/ && go build -ldflags='-s -w' -o bin/passwdreset ./cmd/passwdreset/ && go build -ldflags='-s -w' -o bin/diary-tui ./cmd/diary-tui/"
 
 echo "==> refreshing frontend build"
 cd "$ROOT/web"
@@ -69,24 +71,28 @@ echo "==> copying repo snapshot (including .git, .env)"
   --exclude './tools/seed-data.sql' \
   .) | (cd "$STAGE" && tar -xf -)
 
-echo "==> copying Tailscale state (needs root via container)"
+echo "==> copying Tailscale state"
+# TS_STATE_SRC: override if your tailscale_state is elsewhere.
+# Default: ./tailscale_state next to this script (matches compose.prod.yml).
+TS_STATE_SRC="${TS_STATE_SRC:-$ROOT/tailscale_state}"
 mkdir -p "$STAGE/tailscale_state"
-docker run --rm \
-  -v /home/kts_sz/wp/mnt/docker/wordpress/tailscale_state:/src:ro \
-  -v "$STAGE/tailscale_state:/dst" \
-  alpine sh -c 'cp -a /src/. /dst/ && chmod -R go-rwx /dst'
+if [ -d "$TS_STATE_SRC" ] && [ -n "$(ls -A "$TS_STATE_SRC" 2>/dev/null || true)" ]; then
+  # Use a container so root-owned files are readable.
+  docker run --rm \
+    -v "$TS_STATE_SRC":/src:ro \
+    -v "$STAGE/tailscale_state:/dst" \
+    alpine sh -c 'cp -a /src/. /dst/ && chmod -R go-rwx /dst'
+else
+  echo "    (no state at $TS_STATE_SRC; bundle will require fresh TS_AUTHKEY)"
+fi
 
 echo "==> rewriting compose.prod.yml for bundle layout"
+# Swap schema+seed initdb mounts for the full pg_dump (postgres initdb
+# auto-loads .sql.gz). tailscale_state is already relative (./).
 python3 - "$STAGE/compose.prod.yml" <<'PY'
 import sys, re
 p = sys.argv[1]
 t = open(p).read()
-# tailscale_state: use bundled copy
-t = t.replace(
-    "/home/kts_sz/wp/mnt/docker/wordpress/tailscale_state:/var/lib/tailscale",
-    "./tailscale_state:/var/lib/tailscale",
-)
-# Swap schema+seed initdb mounts for the full pg_dump
 t = re.sub(
     r"\s*- \./schema\.sql:/docker-entrypoint-initdb\.d/01-schema\.sql:ro\n\s*- \./tools/seed-data\.sql:/docker-entrypoint-initdb\.d/02-seed-data\.sql:ro",
     "\n      - ./data/diary.sql.gz:/docker-entrypoint-initdb.d/01-diary.sql.gz:ro",
@@ -99,8 +105,8 @@ echo "==> writing DEPLOY.md"
 cat > "$STAGE/DEPLOY.md" <<'MD'
 # 本番デプロイ手順
 
-このバンドルは ステージング (`shirasagi`) のフルスナップショット + 現時点の DB
-ダンプ + Tailscale 識別情報です。解凍した中身はそのまま作業ディレクトリとして
+このバンドルはステージングのフルスナップショット + 現時点の DB ダンプ +
+Tailscale 識別情報です。解凍した中身はそのまま作業ディレクトリとして
 使えます（.git も含まれているので `git pull` で更新も可能）。
 
 ## 1. 展開
@@ -134,8 +140,8 @@ docker compose -f compose.prod.yml logs --tail=5 server
 
 ## 4. 動作確認
 
-Tailscale admin で `wordpress` ノードが online → ブラウザで
-`https://wordpress.tail2c8c7.ts.net/` 。
+Tailscale admin でノードが online になっていることを確認 → ブラウザで
+`.env` の `RP_ORIGIN` にアクセス。
 
 ## 5. 定期バックアップ
 
@@ -149,7 +155,7 @@ Tailscale admin で `wordpress` ノードが online → ブラウザで
 - **パスワードリセット:** `docker compose -f compose.prod.yml exec server /app/bin/passwdreset -user <login> -password <new>`
 - **TUI クライアント:** `./ops/tui` （初回はイメージを自動ビルド）
 - **開発環境:** `web/` 配下に node_modules がないので `cd web && npm install`
-- **ソース改修:** `.git` があるので通常の git ワークフローで。リモートは GitHub の private repo。
+- **ソース改修:** `.git` があるので通常の git ワークフローで。
 
 ## 機密の取り扱い
 

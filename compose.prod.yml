@@ -1,6 +1,6 @@
-# Production compose for Exchange Diary
-# Reuses the original WordPress Tailscale state → wordpress.tail2c8c7.ts.net
-# All services share Tailscale's network namespace, communicate on 127.0.0.1.
+# Production compose for Exchange Diary.
+# All services share Tailscale's network namespace and communicate on 127.0.0.1.
+# The tailscale_state volume persists the node identity across restarts.
 
 name: diary-prod
 
@@ -16,7 +16,7 @@ services:
       - TS_EXTRA_ARGS=--advertise-exit-node=false
       - TS_SERVE_CONFIG=/config/serve.json
     volumes:
-      - /home/kts_sz/wp/mnt/docker/wordpress/tailscale_state:/var/lib/tailscale
+      - ./tailscale_state:/var/lib/tailscale
       - ./tailscale-serve.json:/config/serve.json:ro
       - /dev/net/tun:/dev/net/tun
 
