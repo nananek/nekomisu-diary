@@ -1,0 +1,97 @@
+:root {
+  --text: #4a4458;
+  --text-h: #1a1625;
+  --bg: #faf9fc;
+  --surface: #fff;
+  --border: #e8e5ed;
+  --accent: #7c5cbf;
+  --accent-light: #ede8f5;
+  --danger: #d94f5c;
+  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, Consolas, monospace;
+  --radius: 8px;
+  --max-w: 680px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #b0a8be;
+    --text-h: #eee8f5;
+    --bg: #141118;
+    --surface: #1e1a24;
+    --border: #302a3a;
+    --accent: #a88be0;
+    --accent-light: #2a2035;
+    --danger: #e87c85;
+  }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font: 16px/1.6 var(--sans);
+  color: var(--text);
+  background: var(--bg);
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+h1, h2, h3 { color: var(--text-h); font-weight: 600; }
+
+button, .btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-h);
+  font: inherit; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+button:hover, .btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+button.primary, .btn.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+button.primary:hover, .btn.primary:hover {
+  opacity: 0.9;
+}
+button.danger { color: var(--danger); border-color: var(--danger); }
+
+input, textarea, select {
+  font: inherit;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-h);
+  width: 100%;
+}
+input:focus, textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+textarea { resize: vertical; min-height: 120px; }
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+
+.loading { text-align: center; padding: 60px; color: var(--text); }
+
+.avatar {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--accent-light);
+}
+
+.meta { font-size: 14px; color: var(--text); }

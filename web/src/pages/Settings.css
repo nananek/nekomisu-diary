@@ -1,0 +1,13 @@
+.settings { display: flex; flex-direction: column; gap: 16px; }
+.settings h2 { margin-bottom: 4px; }
+.settings-section h3 { margin-bottom: 8px; font-size: 17px; }
+
+.pass-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 320px;
+}
+
+.success { color: green; font-size: 14px; }
+.error { color: var(--danger); font-size: 14px; }

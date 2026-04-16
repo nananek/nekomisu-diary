@@ -1,0 +1,17 @@
+.new-post h2 { margin-bottom: 16px; }
+
+.post-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.post-form textarea { min-height: 200px; }
+
+.form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.form-footer select { width: auto; }

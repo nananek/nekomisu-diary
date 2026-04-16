@@ -1,0 +1,24 @@
+.login-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+}
+
+.login-card {
+  width: 360px;
+  max-width: 90vw;
+  text-align: center;
+}
+
+.login-card h1 { margin-bottom: 24px; font-size: 24px; }
+
+.login-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.error { color: var(--danger); font-size: 14px; }
+
+.switch-mode { margin-top: 16px; font-size: 14px; }

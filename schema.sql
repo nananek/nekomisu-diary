@@ -85,6 +85,27 @@ CREATE TABLE sessions (
 CREATE INDEX sessions_user_idx    ON sessions (user_id);
 CREATE INDEX sessions_expires_idx ON sessions (expires_at);
 
+CREATE TABLE totp_secrets (
+  user_id     BIGINT      PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  secret      TEXT        NOT NULL,
+  verified    BOOLEAN     NOT NULL DEFAULT false,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE webauthn_credentials (
+  id              TEXT        PRIMARY KEY,
+  user_id         BIGINT      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name            TEXT        NOT NULL DEFAULT '',
+  public_key      BYTEA       NOT NULL,
+  attestation_type TEXT,
+  aaguid          BYTEA,
+  sign_count      BIGINT      NOT NULL DEFAULT 0,
+  transports      TEXT[],
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX webauthn_user_idx ON webauthn_credentials (user_id);
+
 -- updated_at 自動更新トリガ
 CREATE OR REPLACE FUNCTION set_updated_at() RETURNS TRIGGER AS $$
 BEGIN
