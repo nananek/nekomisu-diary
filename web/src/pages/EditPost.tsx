@@ -45,9 +45,13 @@ export default function EditPost() {
     }
   }
 
-  const convertToMarkdown = () => {
-    if (!confirm('HTMLをプレーンテキストとして取り込みます。元のHTMLは失われます。続行しますか？')) return
-    // Naive conversion: just use body_html as starting point
+  const switchToMarkdown = () => {
+    if (!confirm(
+      'Markdownエディタに切り替えます。\n\n' +
+      '現在のHTML本文が初期テキストとしてコピーされますが、' +
+      '自動でMarkdownに変換されるわけではありません。' +
+      '必要に応じて手で書き直してください。続行しますか？'
+    )) return
     setBodyMd(bodyHtml)
   }
 
@@ -82,8 +86,8 @@ export default function EditPost() {
             <textarea value={bodyHtml} onChange={e => setBodyHtml(e.target.value)} rows={14} required />
             <div style={{ display: 'flex', gap: 8 }}>
               <ImageUploader onInsert={(url) => setBodyHtml(b => b + `\n<img src="${url}" />`)} />
-              <button type="button" onClick={convertToMarkdown} className="ghost">
-                Markdownに変換
+              <button type="button" onClick={switchToMarkdown} className="ghost">
+                Markdownエディタに切り替え
               </button>
             </div>
           </>

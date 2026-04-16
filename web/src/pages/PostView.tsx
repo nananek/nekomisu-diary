@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api } from '../api'
 import type { Post, Comment } from '../api'
 import { useAuth } from '../auth'
+import { errMessage } from '../lib/webauthn'
 import Icon from '../components/Icon'
 import './PostView.css'
 
@@ -14,6 +15,8 @@ export default function PostView() {
   const [comments, setComments] = useState<Comment[]>([])
   const [newComment, setNewComment] = useState('')
   const [replyTo, setReplyTo] = useState<number | null>(null)
+  const [commentError, setCommentError] = useState('')
+  const [commentSubmitting, setCommentSubmitting] = useState(false)
   const postId = Number(id)
 
   useEffect(() => {
@@ -24,11 +27,19 @@ export default function PostView() {
   const submitComment = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newComment.trim()) return
-    await api.createComment(postId, newComment, replyTo ?? undefined)
-    setNewComment('')
-    setReplyTo(null)
-    const d = await api.comments(postId)
-    setComments(d.comments)
+    setCommentError('')
+    setCommentSubmitting(true)
+    try {
+      await api.createComment(postId, newComment, replyTo ?? undefined)
+      setNewComment('')
+      setReplyTo(null)
+      const d = await api.comments(postId)
+      setComments(d.comments)
+    } catch (err) {
+      setCommentError(errMessage(err, 'コメントの送信に失敗しました'))
+    } finally {
+      setCommentSubmitting(false)
+    }
   }
 
   const deleteComment = async (commentId: number) => {
@@ -92,7 +103,10 @@ export default function PostView() {
             </p>
           )}
           <textarea placeholder="コメントを書く..." value={newComment} onChange={e => setNewComment(e.target.value)} rows={3} />
-          <button type="submit" className="primary"><Icon name="send" size={16} />送信</button>
+          {commentError && <p className="error">{commentError}</p>}
+          <button type="submit" className="primary" disabled={commentSubmitting}>
+            <Icon name="send" size={16} />{commentSubmitting ? '送信中...' : '送信'}
+          </button>
         </form>
       </section>
     </div>

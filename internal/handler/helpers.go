@@ -4,10 +4,19 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/nananek/nekomisu-diary/internal/session"
 )
+
+// logIfErr is used to keep the error-ignoring-looks pattern visible in
+// code while ensuring failures hit the log. Safe to call with err==nil.
+func logIfErr(tag string, err error) {
+	if err != nil {
+		log.Printf("%s: %v", tag, err)
+	}
+}
 
 type M map[string]any
 

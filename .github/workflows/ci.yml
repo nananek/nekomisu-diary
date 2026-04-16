@@ -110,6 +110,7 @@ jobs:
           ./bin/server -pg postgres://diary:diary_dev_pw@localhost:5432/diary?sslmode=disable \
                        -uploads ./uploads \
                        -web ./web/dist \
+                       -cookie-secure=false \
                        -addr :3000 &
           sleep 2
           curl -f http://localhost:3000/ || (echo "server not responding"; exit 1)

@@ -2,11 +2,14 @@ package handler
 
 import (
 	"database/sql"
-	"encoding/json"
 	"net/http"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
+	"github.com/nananek/nekomisu-diary/internal/ratelimit"
 	"github.com/nananek/nekomisu-diary/internal/session"
 )
 
@@ -14,6 +17,12 @@ type WebAuthnHandler struct {
 	db   *sql.DB
 	sess *session.Manager
 	wa   *webauthn.WebAuthn
+	rate *ratelimit.Limiter // nil ok; limits LoginFinish per login name
+}
+
+func (h *WebAuthnHandler) WithRateLimit(l *ratelimit.Limiter) *WebAuthnHandler {
+	h.rate = l
+	return h
 }
 
 func NewWebAuthnHandler(db *sql.DB, sess *session.Manager, rpID, rpOrigin string) (*WebAuthnHandler, error) {
@@ -81,10 +90,53 @@ func (h *WebAuthnHandler) loadUser(userID int64) (*waUser, error) {
 	return u, nil
 }
 
-// --- Registration ---
+// --- WebAuthn ceremony session store ---
+//
+// In-memory, mutex-protected, with a TTL sweep. Each registration/login
+// ceremony stores a short-lived SessionData keyed by "purpose:login".
+// Abandoned entries (no matching Finish) are reaped after waSessionTTL.
 
-// sessionStore holds WebAuthn session data in memory (adequate for 3 users)
-var waSessionStore = make(map[string]*webauthn.SessionData)
+const waSessionTTL = 5 * time.Minute
+
+type waSessionEntry struct {
+	data    *webauthn.SessionData
+	expires time.Time
+}
+
+var (
+	waSessionMu    sync.Mutex
+	waSessionStore = map[string]waSessionEntry{}
+)
+
+func waSessionPut(key string, sd *webauthn.SessionData) {
+	waSessionMu.Lock()
+	defer waSessionMu.Unlock()
+	waSessionStore[key] = waSessionEntry{data: sd, expires: time.Now().Add(waSessionTTL)}
+	waSessionSweepLocked()
+}
+
+func waSessionTake(key string) (*webauthn.SessionData, bool) {
+	waSessionMu.Lock()
+	defer waSessionMu.Unlock()
+	e, ok := waSessionStore[key]
+	if !ok {
+		return nil, false
+	}
+	delete(waSessionStore, key)
+	if time.Now().After(e.expires) {
+		return nil, false
+	}
+	return e.data, true
+}
+
+func waSessionSweepLocked() {
+	now := time.Now()
+	for k, e := range waSessionStore {
+		if now.After(e.expires) {
+			delete(waSessionStore, k)
+		}
+	}
+}
 
 func (h *WebAuthnHandler) RegisterBegin(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
@@ -105,7 +157,7 @@ func (h *WebAuthnHandler) RegisterBegin(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	waSessionStore[u.Login] = sessionData
+	waSessionPut("reg:"+u.Login, sessionData)
 	writeJSON(w, http.StatusOK, options)
 }
 
@@ -116,24 +168,24 @@ func (h *WebAuthnHandler) RegisterFinish(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	sd, ok := waSessionStore[u.Login]
+	sd, ok := waSessionTake("reg:" + u.Login)
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, M{"error": "no pending registration"})
 		return
 	}
-	delete(waSessionStore, u.Login)
+
+	// Credential name comes from a query param; body is consumed by
+	// FinishRegistration below.
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		name = "Security Key"
+	}
 
 	waU, _ := h.loadUser(u.UserID)
 	cred, err := h.wa.FinishRegistration(waU, *sd, r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, M{"error": err.Error()})
 		return
-	}
-
-	var name string
-	json.NewDecoder(r.Body).Decode(&struct{ Name *string }{&name})
-	if name == "" {
-		name = "Security Key"
 	}
 
 	transports := make([]string, len(cred.Transport))
@@ -214,7 +266,7 @@ func (h *WebAuthnHandler) LoginBegin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	waSessionStore["login:"+u.Login] = sessionData
+	waSessionPut("login:"+u.Login, sessionData)
 	writeJSON(w, http.StatusOK, options)
 }
 
@@ -225,12 +277,18 @@ func (h *WebAuthnHandler) LoginFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sd, ok := waSessionStore["login:"+u.Login]
+	if h.rate != nil {
+		if !h.rate.Allow("2fa:"+u.Login) || !h.rate.Allow("2fa-ip:"+clientIP(r)) {
+			writeJSON(w, http.StatusTooManyRequests, M{"error": "too many attempts, try again later"})
+			return
+		}
+	}
+
+	sd, ok := waSessionTake("login:" + u.Login)
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, M{"error": "no pending login"})
 		return
 	}
-	delete(waSessionStore, "login:"+u.Login)
 
 	waU, _ := h.loadUser(u.UserID)
 	cred, err := h.wa.FinishLogin(waU, *sd, r)
@@ -246,6 +304,10 @@ func (h *WebAuthnHandler) LoginFinish(w http.ResponseWriter, r *http.Request) {
 	if err := h.sess.Verify(r); err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "session error"})
 		return
+	}
+	if h.rate != nil {
+		h.rate.Reset("2fa:" + u.Login)
+		h.rate.Reset("2fa-ip:" + clientIP(r))
 	}
 	writeJSON(w, http.StatusOK, M{"ok": true})
 }
@@ -307,13 +369,23 @@ func (a pgTextArray) Value() (any, error) {
 	if a == nil {
 		return nil, nil
 	}
-	s := "{"
+	var b strings.Builder
+	b.WriteByte('{')
 	for i, v := range a {
 		if i > 0 {
-			s += ","
+			b.WriteByte(',')
 		}
-		s += `"` + v + `"`
+		b.WriteByte('"')
+		// Escape backslashes and double quotes per PostgreSQL array literal rules.
+		for _, r := range v {
+			switch r {
+			case '\\', '"':
+				b.WriteByte('\\')
+			}
+			b.WriteRune(r)
+		}
+		b.WriteByte('"')
 	}
-	s += "}"
-	return s, nil
+	b.WriteByte('}')
+	return b.String(), nil
 }

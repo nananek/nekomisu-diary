@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/nananek/nekomisu-diary/internal/db"
@@ -16,14 +17,21 @@ import (
 )
 
 func main() {
-	pgDSN := flag.String("pg", "postgres://diary:diary_dev_pw@postgres:5432/diary?sslmode=disable", "PostgreSQL DSN")
+	pgDSN := flag.String("pg", "", "PostgreSQL DSN (required)")
 	addr := flag.String("addr", ":3000", "Listen address")
 	uploadsDir := flag.String("uploads", "", "Path to uploads directory (for serving and storing media)")
 	webDir := flag.String("web", "", "Path to frontend dist directory")
 	rpID := flag.String("rp-id", "localhost", "WebAuthn Relying Party ID (domain)")
 	rpOrigin := flag.String("rp-origin", "http://localhost:3000", "WebAuthn Relying Party origin")
 	discordWebhook := flag.String("discord-webhook", "", "Discord webhook URL for post/comment notifications")
+	cookieSecure := flag.Bool("cookie-secure", true, "Set Secure flag on session cookies (HTTPS only). Turn off for plain-HTTP local dev.")
+	allowRegistration := flag.Bool("allow-registration", false, "Allow unauthenticated POST /api/auth/register. Off by default.")
+	maxBodyBytes := flag.Int64("max-body-bytes", 1<<20, "Maximum JSON request body size in bytes")
 	flag.Parse()
+
+	if *pgDSN == "" {
+		log.Fatal("-pg is required (PostgreSQL DSN)")
+	}
 
 	pool, err := db.Open(*pgDSN)
 	if err != nil {
@@ -31,7 +39,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	sess := session.NewManager(pool)
+	sess := session.NewManager(pool).WithSecureCookies(*cookieSecure)
 
 	go func() {
 		for {
@@ -45,24 +53,31 @@ func main() {
 		log.Printf("Discord notifier enabled")
 	}
 
-	// Login: 10 attempts per 10 minutes per IP + per login name
+	// Login: 10 attempts / 10 min per IP + per login
 	loginRate := ratelimit.New(10, 10*time.Minute)
+	// 2FA: 5 attempts / 10 min per login + per IP
+	twoFARate := ratelimit.New(5, 10*time.Minute)
 	go func() {
 		for {
 			loginRate.Cleanup()
+			twoFARate.Cleanup()
 			time.Sleep(5 * time.Minute)
 		}
 	}()
 
-	auth := handler.NewAuthHandler(pool, sess).WithRateLimit(loginRate)
+	auth := handler.NewAuthHandler(pool, sess).
+		WithRateLimit(loginRate, twoFARate).
+		AllowRegistration(*allowRegistration)
 	posts := handler.NewPostHandler(pool, disc)
 	comments := handler.NewCommentHandler(pool, disc)
-	totpH := handler.NewTOTPHandler(pool, sess)
+	totpH := handler.NewTOTPHandler(pool, sess).WithRateLimit(twoFARate)
 
 	waH, err := handler.NewWebAuthnHandler(pool, sess, *rpID, *rpOrigin)
 	if err != nil {
 		log.Fatalf("webauthn: %v", err)
 	}
+	waH.WithRateLimit(twoFARate)
+	_ = *allowRegistration // used above
 
 	members := handler.NewMemberHandler(pool)
 	unread := handler.NewUnreadHandler(pool)
@@ -114,6 +129,7 @@ func main() {
 
 	// Members
 	mux.Handle("GET /api/members", requireAuth(http.HandlerFunc(members.List)))
+	mux.Handle("GET /api/users/{userId}", requireAuth(http.HandlerFunc(members.Get)))
 
 	// Unread / read markers
 	mux.Handle("GET /api/unread", requireAuth(http.HandlerFunc(unread.Count)))
@@ -145,7 +161,7 @@ func main() {
 		log.Printf("Serving frontend from %s", *webDir)
 	}
 
-	loggedMux := loggingMiddleware(injectUser(sess, mux))
+	loggedMux := loggingMiddleware(limitBody(*maxBodyBytes, injectUser(sess, mux)))
 
 	log.Printf("Listening on %s", *addr)
 	if err := http.ListenAndServe(*addr, loggedMux); err != nil {
@@ -176,6 +192,21 @@ func spaHandler(dir string) http.Handler {
 			return
 		}
 		http.ServeFile(w, r, filepath.Join(dir, "index.html"))
+	})
+}
+
+// limitBody caps request body size on JSON endpoints. Multipart uploads
+// (media handler) set their own larger MaxBytesReader before parsing, so
+// this middleware skips Content-Type: multipart/*.
+func limitBody(max int64, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			ct := r.Header.Get("Content-Type")
+			if !strings.HasPrefix(ct, "multipart/") {
+				r.Body = http.MaxBytesReader(w, r.Body, max)
+			}
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

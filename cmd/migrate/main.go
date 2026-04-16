@@ -23,7 +23,7 @@ type renderedPost struct {
 
 func main() {
 	mariaDSN := flag.String("maria", "wpuser:wp_password@tcp(db:3306)/wordpress?parseTime=true&charset=utf8mb4", "MariaDB DSN (set to your WordPress DB)")
-	pgDSN := flag.String("pg", "postgres://diary:diary_dev_pw@postgres:5432/diary?sslmode=disable", "PostgreSQL DSN")
+	pgDSN := flag.String("pg", "", "PostgreSQL DSN (required)")
 	renderedFile := flag.String("rendered", "tools/rendered.json", "Path to rendered posts JSON from wp-cli")
 	defaultPass := flag.String("default-password", "", "Default bcrypt password for all migrated users (required)")
 	flag.Parse()

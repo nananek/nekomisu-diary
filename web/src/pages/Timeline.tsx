@@ -51,7 +51,7 @@ export default function Timeline() {
           <Link to={`/posts/${p.id}`} className="post-title-link">
             <h2>{p.title}</h2>
           </Link>
-          <div className="post-excerpt" dangerouslySetInnerHTML={{ __html: p.body_html.slice(0, 300) }} />
+          <p className="post-excerpt">{p.excerpt}</p>
           <div className="post-footer">
             <Link to={`/posts/${p.id}`} className="meta footer-link">
               <Icon name="comment" size={14} />

@@ -12,9 +12,13 @@ import (
 )
 
 func main() {
-	pgDSN := flag.String("pg", "postgres://diary:diary_dev_pw@postgres:5432/diary?sslmode=disable", "PostgreSQL DSN")
+	pgDSN := flag.String("pg", "", "PostgreSQL DSN (required)")
 	dryRun := flag.Bool("dry-run", false, "only report changes, don't write")
 	flag.Parse()
+
+	if *pgDSN == "" {
+		log.Fatal("-pg is required")
+	}
 
 	db, err := sql.Open("postgres", *pgDSN)
 	if err != nil {

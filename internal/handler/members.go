@@ -13,6 +13,38 @@ func NewMemberHandler(db *sql.DB) *MemberHandler {
 	return &MemberHandler{db: db}
 }
 
+func (h *MemberHandler) Get(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("userId")
+	var (
+		uid        int64
+		login      string
+		dispName   string
+		createdAt  string
+		avatar     sql.NullString
+		posts      int
+		comments   int
+	)
+	err := h.db.QueryRow(`
+		SELECT u.id, u.login, u.display_name, u.avatar_path, u.created_at,
+		       (SELECT COUNT(*) FROM posts WHERE author_id = u.id AND visibility != 'draft'),
+		       (SELECT COUNT(*) FROM comments WHERE author_id = u.id)
+		FROM users u WHERE u.id = $1`, id,
+	).Scan(&uid, &login, &dispName, &avatar, &createdAt, &posts, &comments)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, M{"error": "not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, M{
+		"id":            uid,
+		"login":         login,
+		"display_name":  dispName,
+		"avatar_path":   nullStr(avatar),
+		"created_at":    createdAt,
+		"post_count":    posts,
+		"comment_count": comments,
+	})
+}
+
 func (h *MemberHandler) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.Query(`
 		SELECT u.id, u.login, u.display_name, u.avatar_path, u.created_at,

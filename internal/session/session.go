@@ -15,11 +15,20 @@ const (
 )
 
 type Manager struct {
-	db *sql.DB
+	db     *sql.DB
+	secure bool
 }
 
 func NewManager(db *sql.DB) *Manager {
 	return &Manager{db: db}
+}
+
+// WithSecureCookies marks the session cookie as Secure so browsers only
+// send it over HTTPS. Must be true in production; false for plain-HTTP
+// local development (e.g. http://localhost:3000).
+func (m *Manager) WithSecureCookies(secure bool) *Manager {
+	m.secure = secure
+	return m
 }
 
 type UserInfo struct {
@@ -55,6 +64,7 @@ func (m *Manager) Create(w http.ResponseWriter, userID int64, verified bool) err
 		Path:     "/",
 		Expires:  expires,
 		HttpOnly: true,
+		Secure:   m.secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 	return nil
@@ -116,6 +126,7 @@ func (m *Manager) Destroy(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
+		Secure:   m.secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 }

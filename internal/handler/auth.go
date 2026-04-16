@@ -12,9 +12,11 @@ import (
 )
 
 type AuthHandler struct {
-	db        *sql.DB
-	sess      *session.Manager
-	loginRate *ratelimit.Limiter // nil ok
+	db                 *sql.DB
+	sess               *session.Manager
+	loginRate          *ratelimit.Limiter // nil ok
+	twoFARate          *ratelimit.Limiter // nil ok
+	allowRegistration  bool
 }
 
 func NewAuthHandler(db *sql.DB, sess *session.Manager) *AuthHandler {
@@ -22,10 +24,24 @@ func NewAuthHandler(db *sql.DB, sess *session.Manager) *AuthHandler {
 }
 
 // WithRateLimit enables rate limiting on login / 2FA verify endpoints.
-func (h *AuthHandler) WithRateLimit(l *ratelimit.Limiter) *AuthHandler {
-	h.loginRate = l
+// loginRate applies to password login; twoFARate to TOTP / WebAuthn
+// verification after login succeeds.
+func (h *AuthHandler) WithRateLimit(loginRate, twoFARate *ratelimit.Limiter) *AuthHandler {
+	h.loginRate = loginRate
+	h.twoFARate = twoFARate
 	return h
 }
+
+// AllowRegistration controls whether POST /api/auth/register is available.
+// Default is false: the endpoint returns 403 unless explicitly enabled.
+func (h *AuthHandler) AllowRegistration(allow bool) *AuthHandler {
+	h.allowRegistration = allow
+	return h
+}
+
+// TwoFARate exposes the 2FA limiter so other handlers (WebAuthn) can
+// share the same bucket.
+func (h *AuthHandler) TwoFARate() *ratelimit.Limiter { return h.twoFARate }
 
 func clientIP(r *http.Request) string {
 	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
@@ -123,6 +139,10 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
+	if !h.allowRegistration {
+		writeJSON(w, http.StatusForbidden, M{"error": "registration is disabled"})
+		return
+	}
 	var req struct {
 		Login       string `json:"login"`
 		Email       string `json:"email"`

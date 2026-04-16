@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -15,6 +16,8 @@ import (
 	"github.com/nananek/nekomisu-diary/internal/testutil"
 	"golang.org/x/crypto/bcrypt"
 )
+
+func itoa(i int64) string { return strconv.FormatInt(i, 10) }
 
 // --- Test harness ---
 
@@ -29,7 +32,7 @@ func newHarness(t *testing.T) *harness {
 	db := testutil.NewDB(t)
 	sess := session.NewManager(db)
 
-	auth := handler.NewAuthHandler(db, sess)
+	auth := handler.NewAuthHandler(db, sess).AllowRegistration(true)
 	posts := handler.NewPostHandler(db, nil)
 	comments := handler.NewCommentHandler(db, nil)
 	members := handler.NewMemberHandler(db)
@@ -479,23 +482,3 @@ func TestMembers_List(t *testing.T) {
 	}
 }
 
-// --- Helpers ---
-
-func itoa(i int64) string {
-	b := make([]byte, 0, 20)
-	if i == 0 {
-		return "0"
-	}
-	neg := i < 0
-	if neg {
-		i = -i
-	}
-	for i > 0 {
-		b = append([]byte{byte('0' + i%10)}, b...)
-		i /= 10
-	}
-	if neg {
-		b = append([]byte{'-'}, b...)
-	}
-	return string(b)
-}

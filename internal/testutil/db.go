@@ -18,13 +18,14 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// adminDSN points to the test server's admin DB (default: `diary` on the
-// dev postgres reachable as `postgres:5432`). Override with TEST_PG_DSN.
+// adminDSN points to the test postgres instance. TEST_PG_DSN is required;
+// there is no default to avoid baking credentials into the repo.
 func adminDSN() string {
-	if v := os.Getenv("TEST_PG_DSN"); v != "" {
-		return v
+	v := os.Getenv("TEST_PG_DSN")
+	if v == "" {
+		panic("TEST_PG_DSN not set; integration tests require a test postgres DSN")
 	}
-	return "postgres://diary:diary_dev_pw@postgres:5432/diary?sslmode=disable"
+	return v
 }
 
 // NewDB creates a fresh, randomly-named database, loads schema.sql, and

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/nananek/nekomisu-diary/internal/ratelimit"
 	"github.com/nananek/nekomisu-diary/internal/session"
 	"github.com/pquerna/otp/totp"
 )
@@ -12,10 +13,16 @@ import (
 type TOTPHandler struct {
 	db   *sql.DB
 	sess *session.Manager
+	rate *ratelimit.Limiter // nil ok; limits Verify2FA per login name
 }
 
 func NewTOTPHandler(db *sql.DB, sess *session.Manager) *TOTPHandler {
 	return &TOTPHandler{db: db, sess: sess}
+}
+
+func (h *TOTPHandler) WithRateLimit(l *ratelimit.Limiter) *TOTPHandler {
+	h.rate = l
+	return h
 }
 
 // Setup generates a new TOTP secret and returns the provisioning URI.
@@ -35,10 +42,12 @@ func (h *TOTPHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Upsert: replace any existing unverified secret
-	h.db.Exec(`DELETE FROM totp_secrets WHERE user_id = $1`, u.UserID)
-	_, err = h.db.Exec(
-		`INSERT INTO totp_secrets (user_id, secret, verified) VALUES ($1, $2, false)`,
+	// Upsert: replace any existing secret atomically so a failed insert
+	// doesn't leave the user without a TOTP secret.
+	_, err = h.db.Exec(`
+		INSERT INTO totp_secrets (user_id, secret, verified)
+		VALUES ($1, $2, false)
+		ON CONFLICT (user_id) DO UPDATE SET secret = EXCLUDED.secret, verified = false`,
 		u.UserID, key.Secret(),
 	)
 	if err != nil {
@@ -82,7 +91,8 @@ func (h *TOTPHandler) Confirm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.db.Exec(`UPDATE totp_secrets SET verified = true WHERE user_id = $1`, u.UserID)
+	_, err = h.db.Exec(`UPDATE totp_secrets SET verified = true WHERE user_id = $1`, u.UserID)
+	logIfErr("totp.Confirm.update", err)
 	writeJSON(w, http.StatusOK, M{"ok": true})
 }
 
@@ -94,7 +104,8 @@ func (h *TOTPHandler) Disable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.db.Exec(`DELETE FROM totp_secrets WHERE user_id = $1`, u.UserID)
+	_, err := h.db.Exec(`DELETE FROM totp_secrets WHERE user_id = $1`, u.UserID)
+	logIfErr("totp.Disable", err)
 	writeJSON(w, http.StatusOK, M{"ok": true})
 }
 
@@ -104,6 +115,13 @@ func (h *TOTPHandler) Verify2FA(w http.ResponseWriter, r *http.Request) {
 	if err != nil || u == nil {
 		writeJSON(w, http.StatusUnauthorized, M{"error": "no pending 2FA session"})
 		return
+	}
+
+	if h.rate != nil {
+		if !h.rate.Allow("2fa:"+u.Login) || !h.rate.Allow("2fa-ip:"+clientIP(r)) {
+			writeJSON(w, http.StatusTooManyRequests, M{"error": "too many attempts, try again later"})
+			return
+		}
 	}
 
 	var req struct {
@@ -131,6 +149,11 @@ func (h *TOTPHandler) Verify2FA(w http.ResponseWriter, r *http.Request) {
 	if err := h.sess.Verify(r); err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "session error"})
 		return
+	}
+	// Success — clear the 2FA counters
+	if h.rate != nil {
+		h.rate.Reset("2fa:" + u.Login)
+		h.rate.Reset("2fa-ip:" + clientIP(r))
 	}
 	writeJSON(w, http.StatusOK, M{"ok": true})
 }

@@ -15,11 +15,7 @@ export default function MemberPosts() {
 
   useEffect(() => {
     let active = true
-    api.members().then(d => {
-      if (!active) return
-      const m = d.members.find(m => m.id === uid)
-      if (m) setMember(m)
-    })
+    api.user(uid).then(m => { if (active) setMember(m) }).catch(() => { /* ignore */ })
     return () => { active = false }
   }, [uid])
 
@@ -60,7 +56,7 @@ export default function MemberPosts() {
                 </span>
               </div>
               <Link to={`/posts/${p.id}`} className="post-title-link"><h3>{p.title}</h3></Link>
-              <div className="post-excerpt" dangerouslySetInnerHTML={{ __html: p.body_html.slice(0, 200) }} />
+              <p className="post-excerpt">{p.excerpt}</p>
               <span className="meta footer-link">
                 {p.comment_count > 0 && <><Icon name="comment" size={12} /> {p.comment_count}件</>}
               </span>

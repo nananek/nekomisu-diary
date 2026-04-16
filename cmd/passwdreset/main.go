@@ -12,13 +12,13 @@ import (
 )
 
 func main() {
-	pgDSN := flag.String("pg", "postgres://diary:diary_dev_pw@postgres:5432/diary?sslmode=disable", "PostgreSQL DSN")
+	pgDSN := flag.String("pg", "", "PostgreSQL DSN (required)")
 	login := flag.String("user", "", "User login name (required)")
 	newPass := flag.String("password", "", "New password (required)")
 	flag.Parse()
 
-	if *login == "" || *newPass == "" {
-		fmt.Fprintln(os.Stderr, "Usage: passwdreset -user <login> -password <newpass> [-pg <dsn>]")
+	if *pgDSN == "" || *login == "" || *newPass == "" {
+		fmt.Fprintln(os.Stderr, "Usage: passwdreset -pg <dsn> -user <login> -password <newpass>")
 		os.Exit(1)
 	}
 

@@ -14,8 +14,11 @@ export interface Post {
   author_name: string
   author_avatar: string | null
   title: string
+  /** Full body HTML. Empty on list endpoints; populated only on GET /api/posts/:id. */
   body_html: string
   body_md?: string | null
+  /** Plain-text excerpt (no HTML). Populated on list endpoints. */
+  excerpt: string
   visibility: string
   published_at: string | null
   created_at: string
@@ -156,6 +159,7 @@ export const api = {
 
   // Members
   members: () => request<{ members: Member[] }>('/api/members'),
+  user: (id: number) => request<Member>(`/api/users/${id}`),
 
   // Unread
   unread: () => request<{ unread: number; last_seen: string }>('/api/unread'),

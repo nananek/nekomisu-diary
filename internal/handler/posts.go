@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/nananek/nekomisu-diary/internal/sanitize"
@@ -31,10 +32,34 @@ type postJSON struct {
 	Title       string  `json:"title"`
 	BodyHTML    string  `json:"body_html"`
 	BodyMD      *string `json:"body_md,omitempty"`
+	Excerpt     string  `json:"excerpt"`
 	Visibility  string  `json:"visibility"`
 	PublishedAt *string `json:"published_at"`
 	CreatedAt   string  `json:"created_at"`
 	CommentCount int    `json:"comment_count"`
+}
+
+// makeExcerpt strips tags from HTML and truncates to the given rune count.
+// The result is safe to render as text content (no HTML).
+func makeExcerpt(htmlStr string, runes int) string {
+	var b strings.Builder
+	inTag := false
+	for _, r := range htmlStr {
+		switch {
+		case r == '<':
+			inTag = true
+		case r == '>':
+			inTag = false
+		case !inTag:
+			b.WriteRune(r)
+		}
+	}
+	s := strings.TrimSpace(b.String())
+	rs := []rune(s)
+	if len(rs) > runes {
+		return string(rs[:runes]) + "…"
+	}
+	return s
 }
 
 func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -82,6 +107,8 @@ func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
 			s := publishedAt.Format(time.RFC3339)
 			p.PublishedAt = &s
 		}
+		p.Excerpt = makeExcerpt(p.BodyHTML, 160)
+		p.BodyHTML = ""
 		posts = append(posts, p)
 	}
 
@@ -349,6 +376,9 @@ func scanPosts(rows *sql.Rows) []postJSON {
 			s := pubAtNull.Time.Format(time.RFC3339)
 			p.PublishedAt = &s
 		}
+		p.Excerpt = makeExcerpt(p.BodyHTML, 160)
+		// Timeline lists don't need the full body payload — keep it small.
+		p.BodyHTML = ""
 		posts = append(posts, p)
 	}
 	return posts
