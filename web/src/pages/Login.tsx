@@ -116,7 +116,7 @@ export default function Login() {
   return (
     <div className="login-page">
       <div className="login-card card">
-        <h1>交換日記</h1>
+        <h1>ねこのみすきー交換日記</h1>
         <form onSubmit={submit}>
           <input placeholder="ログインID" value={login} onChange={e => setLogin(e.target.value)} required autoFocus />
           {mode === 'register' && (

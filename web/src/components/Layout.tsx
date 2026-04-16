@@ -30,7 +30,7 @@ export default function Layout() {
   return (
     <div className="layout">
       <header className="topbar">
-        <Link to="/" className="site-title" onClick={close}>交換日記</Link>
+        <Link to="/" className="site-title" onClick={close}>ねこのみすきー交換日記</Link>
         <div className="topbar-actions">
           <button className="ghost" onClick={cycle} title={`テーマ: ${themeLabel}`}>
             <Icon name={themeIcon} size={18} />

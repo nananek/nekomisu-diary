@@ -1,13 +1,14 @@
 {
-  "name": "Exchange Diary",
-  "short_name": "Diary",
-  "description": "Private exchange diary for friends",
+  "name": "ねこのみすきー交換日記",
+  "short_name": "ねこのみすきー",
+  "description": "仲間内でつける交換日記",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#faf9fc",
   "theme_color": "#7c5cbf",
   "orientation": "portrait-primary",
   "scope": "/",
+  "lang": "ja",
   "icons": [
     { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
