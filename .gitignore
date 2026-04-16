@@ -1,0 +1,52 @@
+# --- Sensitive: never commit any production data dumps or content ---
+# (本番DBダンプ・展開済みデータは絶対に含めない)
+*.tar.bz2
+*.tar.xz
+*.tar.gz
+*.sql.gz
+*.dump
+mnt/
+db-data/
+pg-data/
+wordpress-data/
+uploads/
+tailscale_state/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Go
+/bin/
+/dist/
+*.test
+*.out
+coverage.*
+vendor/
+
+# Node / Vite
+node_modules/
+web/dist/
+web/.vite/
+web/.cache/
+.DS_Store
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Generated migrations DB state (dev only)
+*.sqlite
+*.sqlite3
+*.db
