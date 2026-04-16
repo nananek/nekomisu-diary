@@ -2,6 +2,8 @@ package handler
 
 import (
 	"database/sql"
+	"encoding/base64"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -12,6 +14,19 @@ import (
 	"github.com/nananek/nekomisu-diary/internal/ratelimit"
 	"github.com/nananek/nekomisu-diary/internal/session"
 )
+
+// Credential IDs are arbitrary bytes from the authenticator and often
+// contain non-UTF-8 sequences. We store them base64url-encoded in the
+// TEXT primary key column so postgres is happy, and decode on read.
+func encodeCredID(id []byte) string { return base64.RawURLEncoding.EncodeToString(id) }
+func decodeCredID(s string) []byte {
+	b, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		// tolerate older legacy rows (none exist yet, but be safe)
+		return []byte(s)
+	}
+	return b
+}
 
 type WebAuthnHandler struct {
 	db   *sql.DB
@@ -78,7 +93,7 @@ func (h *WebAuthnHandler) loadUser(userID int64) (*waUser, error) {
 		if err := rows.Scan(&credID, &cred.PublicKey, &attType, &cred.Authenticator.SignCount, (*pgTextArray)(&transports)); err != nil {
 			continue
 		}
-		cred.ID = []byte(credID)
+		cred.ID = decodeCredID(credID)
 		if attType.Valid {
 			cred.AttestationType = attType.String
 		}
@@ -196,10 +211,11 @@ func (h *WebAuthnHandler) RegisterFinish(w http.ResponseWriter, r *http.Request)
 	_, err = h.db.Exec(`
 		INSERT INTO webauthn_credentials (id, user_id, name, public_key, attestation_type, sign_count, transports)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		string(cred.ID), u.UserID, name, cred.PublicKey, cred.AttestationType,
+		encodeCredID(cred.ID), u.UserID, name, cred.PublicKey, cred.AttestationType,
 		cred.Authenticator.SignCount, (*pgTextArray)(&transports),
 	)
 	if err != nil {
+		log.Printf("webauthn insert: %v", err)
 		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
 		return
 	}
@@ -213,8 +229,10 @@ func (h *WebAuthnHandler) DeleteCredential(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// credId in the URL is already the base64url string stored in DB.
 	credID := r.PathValue("credId")
-	h.db.Exec(`DELETE FROM webauthn_credentials WHERE id = $1 AND user_id = $2`, credID, u.UserID)
+	_, err := h.db.Exec(`DELETE FROM webauthn_credentials WHERE id = $1 AND user_id = $2`, credID, u.UserID)
+	logIfErr("webauthn.Delete", err)
 	writeJSON(w, http.StatusOK, M{"ok": true})
 }
 
@@ -298,8 +316,9 @@ func (h *WebAuthnHandler) LoginFinish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update sign count
-	h.db.Exec(`UPDATE webauthn_credentials SET sign_count = $1 WHERE id = $2`,
-		cred.Authenticator.SignCount, string(cred.ID))
+	_, uerr := h.db.Exec(`UPDATE webauthn_credentials SET sign_count = $1 WHERE id = $2`,
+		cred.Authenticator.SignCount, encodeCredID(cred.ID))
+	logIfErr("webauthn.LoginFinish.sign_count", uerr)
 
 	if err := h.sess.Verify(r); err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "session error"})
