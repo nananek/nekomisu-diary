@@ -90,8 +90,8 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Load schema
-        run: psql postgres://diary:diary_dev_pw@localhost:5432/diary -f schema.sql
+      - name: Run migrations
+        run: go run ./cmd/migrate-db -pg postgres://diary:diary_dev_pw@localhost:5432/diary?sslmode=disable up
 
       - name: Seed test user
         run: go run ./cmd/seeduser -pg postgres://diary:diary_dev_pw@localhost:5432/diary?sslmode=disable
