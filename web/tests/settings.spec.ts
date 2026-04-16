@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { loginUI, loginAPI, TEST_USER } from './helpers'
+import { loginUI, loginAPI } from './helpers'
 
 test.describe('Settings E2E', () => {
   test('navigate to settings page shows all sections', async ({ page }) => {

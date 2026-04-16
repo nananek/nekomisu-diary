@@ -71,9 +71,6 @@ test.describe('Mobile layout', () => {
   })
 
   test('theme toggle works', async ({ page }) => {
-    await page.goto('/login')
-    // Default should be auto (or whatever), after click cycles
-    const themeBtn = page.locator('button[title^="テーマ"]')
     // Theme button only shows inside Layout (needs login)
     await login(page)
     const theme = page.locator('button[title^="テーマ"]')

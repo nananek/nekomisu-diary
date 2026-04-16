@@ -8,7 +8,7 @@ interface BeforeInstallPromptEvent extends Event {
 let deferredPrompt: BeforeInstallPromptEvent | null = null
 
 export function usePWAInstall() {
-  const [canInstall, setCanInstall] = useState(false)
+  const [canInstall, setCanInstall] = useState(() => !!deferredPrompt)
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -17,12 +17,6 @@ export function usePWAInstall() {
       setCanInstall(true)
     }
     window.addEventListener('beforeinstallprompt', handler)
-
-    // Already installed?
-    if (window.matchMedia('(display-mode: standalone)').matches) {
-      setCanInstall(false)
-    }
-
     return () => window.removeEventListener('beforeinstallprompt', handler)
   }, [])
 

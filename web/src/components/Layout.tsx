@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { useAuth } from '../App'
+import { useAuth } from '../auth'
 import { api } from '../api'
 import { usePWAInstall } from '../hooks/usePWAInstall'
 import { useTheme } from '../hooks/useTheme'

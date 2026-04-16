@@ -114,8 +114,9 @@ export const api = {
     request('/api/auth/totp/verify-login', { method: 'POST', body: JSON.stringify({ code }) }),
 
   // WebAuthn
-  webauthnRegisterBegin: () => request('/api/auth/webauthn/register/begin', { method: 'POST' }),
-  webauthnRegisterFinish: (credential: any) =>
+  webauthnRegisterBegin: () =>
+    request<import('./lib/webauthn').RegistrationOptionsJSON>('/api/auth/webauthn/register/begin', { method: 'POST' }),
+  webauthnRegisterFinish: (credential: unknown): Promise<{ ok?: boolean; error?: string }> =>
     fetch('/api/auth/webauthn/register/finish', {
       method: 'POST',
       credentials: 'same-origin',
@@ -126,8 +127,9 @@ export const api = {
     request<{ credentials: WebAuthnCredential[] }>('/api/auth/webauthn/credentials'),
   webauthnDeleteCredential: (id: string) =>
     request(`/api/auth/webauthn/credentials/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  webauthnLoginBegin: () => request('/api/auth/webauthn/login/begin', { method: 'POST' }),
-  webauthnLoginFinish: (credential: any) =>
+  webauthnLoginBegin: () =>
+    request<import('./lib/webauthn').LoginOptionsJSON>('/api/auth/webauthn/login/begin', { method: 'POST' }),
+  webauthnLoginFinish: (credential: unknown): Promise<{ ok?: boolean; error?: string }> =>
     fetch('/api/auth/webauthn/login/finish', {
       method: 'POST',
       credentials: 'same-origin',

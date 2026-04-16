@@ -10,16 +10,23 @@ export default function Timeline() {
   const [posts, setPosts] = useState<Post[]>([])
   const [page, setPage] = useState(1)
   const [pages, setPages] = useState(1)
-  const [loading, setLoading] = useState(true)
+  const [loaded, setLoaded] = useState(false)
   const { markSeen } = useUnread()
 
   useEffect(() => {
-    setLoading(true)
+    let active = true
     api.posts(page)
-      .then(d => { setPosts(d.posts); setPages(d.pages) })
+      .then(d => {
+        if (!active) return
+        setPosts(d.posts)
+        setPages(d.pages)
+        setLoaded(true)
+      })
       .then(() => markSeen())
-      .finally(() => setLoading(false))
+    return () => { active = false }
   }, [page, markSeen])
+
+  const loading = !loaded
 
   if (loading) return <div className="loading">読み込み中...</div>
 

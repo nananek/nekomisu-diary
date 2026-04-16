@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../App'
+import { useAuth } from '../auth'
 import { api } from '../api'
 import type { LoginResult } from '../api'
 import Icon from '../components/Icon'
+import { decodeLogin, encodeAssertion, errMessage } from '../lib/webauthn'
 import './Login.css'
 
 export default function Login() {
@@ -35,8 +36,8 @@ export default function Login() {
       const user = await api.me()
       setUser(user)
       nav('/')
-    } catch (err: any) {
-      setError(err.message)
+    } catch (err) {
+      setError(errMessage(err, 'ログインに失敗しました'))
     }
   }
 
@@ -48,43 +49,27 @@ export default function Login() {
       const user = await api.me()
       setUser(user)
       nav('/')
-    } catch (err: any) {
-      setError(err.message)
+    } catch (err) {
+      setError(errMessage(err))
     }
   }
 
   const loginWebAuthn = async () => {
     setError('')
     try {
-      const options: any = await api.webauthnLoginBegin()
-      const publicKey = {
-        ...options.publicKey,
-        challenge: base64urlToBuffer(options.publicKey.challenge),
-        allowCredentials: options.publicKey.allowCredentials?.map((c: any) => ({
-          ...c, id: base64urlToBuffer(c.id),
-        })),
-      }
+      const options = await api.webauthnLoginBegin()
+      const publicKey = decodeLogin(options)
       const assertion = await navigator.credentials.get({ publicKey }) as PublicKeyCredential
-      const response = assertion.response as AuthenticatorAssertionResponse
-      const body = {
-        id: assertion.id,
-        rawId: bufferToBase64url(assertion.rawId),
-        type: assertion.type,
-        response: {
-          authenticatorData: bufferToBase64url(response.authenticatorData),
-          clientDataJSON: bufferToBase64url(response.clientDataJSON),
-          signature: bufferToBase64url(response.signature),
-          userHandle: response.userHandle ? bufferToBase64url(response.userHandle) : null,
-        },
-      }
-      const result = await api.webauthnLoginFinish(body)
+      const result = await api.webauthnLoginFinish(encodeAssertion(assertion))
       if (result.ok) {
         const user = await api.me()
         setUser(user)
         nav('/')
+      } else {
+        setError(result.error || '認証に失敗しました')
       }
-    } catch (err: any) {
-      setError(err.message || '認証に失敗しました')
+    } catch (err) {
+      setError(errMessage(err, '認証に失敗しました'))
     }
   }
 
@@ -140,17 +125,4 @@ export default function Login() {
       </div>
     </div>
   )
-}
-
-function base64urlToBuffer(b: string): ArrayBuffer {
-  const s = b.replace(/-/g, '+').replace(/_/g, '/');
-  const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
-  const bin = atob(s + pad); const a = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) a[i] = bin.charCodeAt(i);
-  return a.buffer;
-}
-function bufferToBase64url(buf: ArrayBuffer): string {
-  const a = new Uint8Array(buf); let s = '';
-  for (const b of a) s += String.fromCharCode(b);
-  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }

@@ -1,0 +1,34 @@
+# Multi-stage build for the main server image.
+# Produces a small Alpine image with the Go server binary + SPA assets.
+# Used by GHCR releases.
+
+FROM golang:1.25-alpine AS go-builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+COPY schema.sql ./schema.sql
+RUN CGO_ENABLED=0 go build -ldflags='-s -w' -o /out/server ./cmd/server/ \
+ && CGO_ENABLED=0 go build -ldflags='-s -w' -o /out/passwdreset ./cmd/passwdreset/
+
+FROM node:22-alpine AS web-builder
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --include=dev
+COPY web/ ./
+RUN npx vite build
+
+FROM alpine:latest
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=go-builder /out/server /app/bin/server
+COPY --from=go-builder /out/passwdreset /app/bin/passwdreset
+COPY --from=web-builder /web/dist /app/web/dist
+
+WORKDIR /app
+ENV DIARY_UPLOADS_DIR=/app/uploads \
+    DIARY_WEB_DIR=/app/web/dist
+VOLUME ["/app/uploads"]
+EXPOSE 3000
+ENTRYPOINT ["/app/bin/server"]
+CMD ["-addr=:3000", "-uploads=/app/uploads", "-web=/app/web/dist"]

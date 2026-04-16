@@ -1,7 +1,8 @@
-import { useState, useEffect, createContext, useContext } from 'react'
+import { useState, useEffect } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { api } from './api'
 import type { User } from './api'
+import { AuthContext } from './auth'
 import Login from './pages/Login'
 import Timeline from './pages/Timeline'
 import PostView from './pages/PostView'
@@ -15,28 +16,17 @@ import MemberPosts from './pages/MemberPosts'
 import Gallery from './pages/Gallery'
 import Layout from './components/Layout'
 
-interface AuthCtx {
-  user: User | null
-  setUser: (u: User | null) => void
-  loading: boolean
-}
-
-export const AuthContext = createContext<AuthCtx>({
-  user: null,
-  setUser: () => {},
-  loading: true,
-})
-
-export function useAuth() {
-  return useContext(AuthContext)
-}
-
 function App() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.me().then(setUser).catch(() => setUser(null)).finally(() => setLoading(false))
+    let active = true
+    api.me()
+      .then(u => { if (active) setUser(u) })
+      .catch(() => { if (active) setUser(null) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
   }, [])
 
   if (loading) return <div className="loading">Loading...</div>

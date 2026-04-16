@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { useAuth } from '../App'
+import { useAuth } from '../auth'
 import { api } from '../api'
 import type { User, WebAuthnCredential } from '../api'
 import Icon from '../components/Icon'
+import { decodeRegistration, encodeAttestation, errMessage } from '../lib/webauthn'
 import './Settings.css'
 
 export default function Settings() {
@@ -78,7 +79,7 @@ function PasswordSection() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); setMsg(''); setError('')
     try { await api.changePassword(oldPass, newPass); setMsg('パスワードを変更しました'); setOldPass(''); setNewPass('') }
-    catch (err: any) { setError(err.message) }
+    catch (err) { setError(errMessage(err)) }
   }
   return (
     <section className="card settings-section">
@@ -104,7 +105,7 @@ function TOTPSection({ user, setUser }: { user: User; setUser: (u: User) => void
   const confirm = async (e: React.FormEvent) => {
     e.preventDefault(); setError('')
     try { await api.totpConfirm(code); setMsg('TOTP を有効にしました'); setSetupUrl(''); setSecret(''); setCode(''); const u = await api.me(); setUser(u) }
-    catch (err: any) { setError(err.message) }
+    catch (err) { setError(errMessage(err)) }
   }
   const disable = async () => { await api.totpDisable(); const u = await api.me(); setUser(u) }
 
@@ -137,27 +138,29 @@ function TOTPSection({ user, setUser }: { user: User; setUser: (u: User) => void
 function WebAuthnSection({ setUser }: { setUser: (u: User) => void }) {
   const [creds, setCreds] = useState<WebAuthnCredential[]>([])
   const [error, setError] = useState(''); const [msg, setMsg] = useState('')
-  useEffect(() => { api.webauthnCredentials().then(d => setCreds(d.credentials)) }, [])
+  useEffect(() => {
+    let active = true
+    api.webauthnCredentials().then(d => { if (active) setCreds(d.credentials) })
+    return () => { active = false }
+  }, [])
 
   const register = async () => {
     setError(''); setMsg('')
     try {
-      const options: any = await api.webauthnRegisterBegin()
-      const publicKey = {
-        ...options.publicKey,
-        challenge: b64ToBuf(options.publicKey.challenge),
-        user: { ...options.publicKey.user, id: b64ToBuf(options.publicKey.user.id) },
-        excludeCredentials: options.publicKey.excludeCredentials?.map((c: any) => ({ ...c, id: b64ToBuf(c.id) })),
-      }
+      const options = await api.webauthnRegisterBegin()
+      const publicKey = decodeRegistration(options)
       const cred = await navigator.credentials.create({ publicKey }) as PublicKeyCredential
-      const resp = cred.response as AuthenticatorAttestationResponse
-      const result = await api.webauthnRegisterFinish({
-        id: cred.id, rawId: bufTo64(cred.rawId), type: cred.type,
-        response: { attestationObject: bufTo64(resp.attestationObject), clientDataJSON: bufTo64(resp.clientDataJSON) },
-      })
-      if (result.ok) { setMsg('セキュリティキーを登録しました'); const d = await api.webauthnCredentials(); setCreds(d.credentials); const u = await api.me(); setUser(u) }
-      else setError(result.error || '登録に失敗しました')
-    } catch (err: any) { setError(err.message || '操作がキャンセルされました') }
+      const result = await api.webauthnRegisterFinish(encodeAttestation(cred))
+      if (result.ok) {
+        setMsg('セキュリティキーを登録しました')
+        const d = await api.webauthnCredentials(); setCreds(d.credentials)
+        const u = await api.me(); setUser(u)
+      } else {
+        setError(result.error || '登録に失敗しました')
+      }
+    } catch (err) {
+      setError(errMessage(err, '操作がキャンセルされました'))
+    }
   }
   const remove = async (id: string) => {
     await api.webauthnDeleteCredential(id); const d = await api.webauthnCredentials(); setCreds(d.credentials); const u = await api.me(); setUser(u)
@@ -181,16 +184,4 @@ function WebAuthnSection({ setUser }: { setUser: (u: User) => void }) {
       <button onClick={register}><Icon name="plus" size={16} />キーを追加</button>
     </section>
   )
-}
-
-function b64ToBuf(b: string): ArrayBuffer {
-  const s = b.replace(/-/g,'+').replace(/_/g,'/');
-  const p = s.length%4===0?'':'='.repeat(4-s.length%4);
-  const d = atob(s+p); const a = new Uint8Array(d.length);
-  for(let i=0;i<d.length;i++) a[i]=d.charCodeAt(i); return a.buffer;
-}
-function bufTo64(buf: ArrayBuffer): string {
-  const a = new Uint8Array(buf); let s='';
-  for(const b of a) s+=String.fromCharCode(b);
-  return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
 }

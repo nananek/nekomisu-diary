@@ -1,29 +1,27 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useAuth } from '../App'
+import { useAuth } from '../auth'
 import Icon from './Icon'
 import './TwoFABanner.css'
 
 const DISMISSED_KEY = 'twofa-banner-dismissed-until'
 const SNOOZE_DAYS = 7
 
+function loadDismissed(): boolean {
+  const until = localStorage.getItem(DISMISSED_KEY)
+  return !!(until && Date.now() < Number(until))
+}
+
 export default function TwoFABanner() {
   const { user } = useAuth()
-  const [visible, setVisible] = useState(false)
-
-  useEffect(() => {
-    if (!user) return
-    if (user.has_2fa) { setVisible(false); return }
-    const until = localStorage.getItem(DISMISSED_KEY)
-    if (until && Date.now() < Number(until)) { setVisible(false); return }
-    setVisible(true)
-  }, [user])
+  const [dismissed, setDismissed] = useState<boolean>(loadDismissed)
 
   const dismiss = () => {
     localStorage.setItem(DISMISSED_KEY, String(Date.now() + SNOOZE_DAYS * 86400 * 1000))
-    setVisible(false)
+    setDismissed(true)
   }
 
+  const visible = !!user && !user.has_2fa && !dismissed
   if (!visible) return null
 
   return (

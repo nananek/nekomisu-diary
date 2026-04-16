@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api } from '../api'
 import type { Post, Comment } from '../api'
-import { useAuth } from '../App'
+import { useAuth } from '../auth'
 import Icon from '../components/Icon'
 import './PostView.css'
 

@@ -11,10 +11,28 @@ export default function MemberPosts() {
   const [member, setMember] = useState<Member | null>(null)
   const [page, setPage] = useState(1)
   const [pages, setPages] = useState(1)
-  const [loading, setLoading] = useState(true)
+  const [loaded, setLoaded] = useState(false)
 
-  useEffect(() => { api.members().then(d => { const m = d.members.find(m => m.id === uid); if (m) setMember(m) }) }, [uid])
-  useEffect(() => { setLoading(true); api.userPosts(uid, page).then(d => { setPosts(d.posts); setPages(d.pages) }).finally(() => setLoading(false)) }, [uid, page])
+  useEffect(() => {
+    let active = true
+    api.members().then(d => {
+      if (!active) return
+      const m = d.members.find(m => m.id === uid)
+      if (m) setMember(m)
+    })
+    return () => { active = false }
+  }, [uid])
+
+  useEffect(() => {
+    let active = true
+    api.userPosts(uid, page).then(d => {
+      if (!active) return
+      setPosts(d.posts); setPages(d.pages); setLoaded(true)
+    })
+    return () => { active = false }
+  }, [uid, page])
+
+  const loading = !loaded
 
   return (
     <div className="timeline">
