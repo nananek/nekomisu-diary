@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  go:
+    name: Go build & test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: diary
+          POSTGRES_PASSWORD: diary_dev_pw
+          POSTGRES_DB: diary
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - name: go vet
+        run: go vet ./...
+      - name: go build
+        run: go build ./...
+      - name: go test
+        env:
+          TEST_PG_DSN: postgres://diary:diary_dev_pw@localhost:5432/diary?sslmode=disable
+        run: go test ./internal/... -count=1
+
+  web:
+    name: Frontend lint & build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --include=dev
+      - name: ESLint
+        run: npx eslint .
+      - name: Vite build
+        run: npx vite build
+
+  e2e:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    needs: [go, web]
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: diary
+          POSTGRES_PASSWORD: diary_dev_pw
+          POSTGRES_DB: diary
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Load schema
+        run: psql postgres://diary:diary_dev_pw@localhost:5432/diary -f schema.sql
+
+      - name: Seed test user
+        run: go run ./cmd/seeduser -pg postgres://diary:diary_dev_pw@localhost:5432/diary?sslmode=disable
+
+      - name: Build server
+        run: go build -o bin/server ./cmd/server/
+
+      - name: Build frontend
+        working-directory: web
+        run: |
+          npm ci --include=dev
+          npx vite build
+
+      - name: Install Playwright browsers
+        working-directory: web
+        run: npx playwright install chromium --with-deps
+
+      - name: Start server
+        run: |
+          ./bin/server -pg postgres://diary:diary_dev_pw@localhost:5432/diary?sslmode=disable \
+                       -uploads ./uploads \
+                       -web ./web/dist \
+                       -addr :3000 &
+          sleep 2
+          curl -f http://localhost:3000/ || (echo "server not responding"; exit 1)
+        env:
+          GOTOOLCHAIN: auto
+
+      - name: Run Playwright
+        working-directory: web
+        run: npx playwright test
+
+      - name: Upload test artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          retention-days: 7
