@@ -133,6 +133,8 @@ button.nav-item {
     border-top: 1px solid var(--border);
     padding: 4px 0 calc(4px + env(safe-area-inset-bottom, 0));
     justify-content: space-around;
+    position: relative;
+    z-index: 10;
   }
   .bottom-nav a {
     display: flex;
@@ -162,5 +164,7 @@ button.nav-item {
     box-shadow: 0 4px 12px rgba(124,92,191,0.4);
     padding: 0;
     min-width: auto;
+    position: relative;
+    z-index: 1;
   }
 }
