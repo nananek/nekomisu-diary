@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -119,6 +120,8 @@ func migrateUsers(maria, pg *sql.DB, passHash string) error {
 				SELECT REPLACE(guid, SUBSTRING_INDEX(guid, '/wp-content/uploads/', 1), '')
 				FROM wp_posts WHERE ID = ?`, avatarAttID.String).Scan(&path)
 			if err == nil {
+				// /wp-content/uploads/... → /uploads/...
+				path = strings.Replace(path, "/wp-content/uploads/", "/uploads/", 1)
 				avatarPath = sql.NullString{String: path, Valid: true}
 			}
 		}
