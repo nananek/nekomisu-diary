@@ -12,6 +12,7 @@ import Drafts from './pages/Drafts'
 import Search from './pages/Search'
 import Members from './pages/Members'
 import MemberPosts from './pages/MemberPosts'
+import Gallery from './pages/Gallery'
 import Layout from './components/Layout'
 
 interface AuthCtx {
@@ -53,6 +54,7 @@ function App() {
           <Route path="/search" element={<Search />} />
           <Route path="/members" element={<Members />} />
           <Route path="/members/:userId" element={<MemberPosts />} />
+          <Route path="/media" element={<Gallery />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>

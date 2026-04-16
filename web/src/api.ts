@@ -15,6 +15,7 @@ export interface Post {
   author_avatar: string | null
   title: string
   body_html: string
+  body_md?: string | null
   visibility: string
   published_at: string | null
   created_at: string
@@ -138,12 +139,12 @@ export const api = {
   posts: (page = 1) =>
     request<{ posts: Post[]; total: number; page: number; pages: number }>(`/api/posts?page=${page}`),
   post: (id: number) => request<Post>(`/api/posts/${id}`),
-  createPost: (title: string, body: string, visibility = 'public') =>
+  createPost: (title: string, body: string, visibility = 'public', bodyMd?: string) =>
     request<{ id: number }>('/api/posts', {
       method: 'POST',
-      body: JSON.stringify({ title, body, visibility }),
+      body: JSON.stringify({ title, body, body_md: bodyMd, visibility }),
     }),
-  updatePost: (id: number, data: { title?: string; body?: string; visibility?: string }) =>
+  updatePost: (id: number, data: { title?: string; body?: string; body_md?: string | null; visibility?: string }) =>
     request(`/api/posts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deletePost: (id: number) => request(`/api/posts/${id}`, { method: 'DELETE' }),
   drafts: () => request<{ posts: Post[] }>('/api/posts/drafts'),
@@ -153,6 +154,10 @@ export const api = {
 
   // Members
   members: () => request<{ members: Member[] }>('/api/members'),
+
+  // Unread
+  unread: () => request<{ unread: number; last_seen: string }>('/api/unread'),
+  markSeen: () => request('/api/unread/mark-seen', { method: 'POST' }),
 
   // Comments
   comments: (postId: number) =>
@@ -170,4 +175,18 @@ export const api = {
     uploadFile<{ id: number; url: string; path: string }>(
       '/api/media/upload', file, postId ? { post_id: String(postId) } : undefined,
     ),
+  listMedia: () => request<{ items: MediaItem[] }>('/api/media'),
+  deleteMedia: (id: number) => request(`/api/media/${id}`, { method: 'DELETE' }),
+}
+
+export interface MediaItem {
+  id: number
+  filename: string
+  url: string
+  thumbnail_url?: string
+  mime_type: string
+  byte_size?: number
+  width?: number
+  height?: number
+  created_at: string
 }

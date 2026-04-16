@@ -3,19 +3,35 @@ package handler
 import (
 	"database/sql"
 	"encoding/json"
+	"net"
 	"net/http"
 
+	"github.com/nananek/nekomisu-diary/internal/ratelimit"
 	"github.com/nananek/nekomisu-diary/internal/session"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthHandler struct {
-	db   *sql.DB
-	sess *session.Manager
+	db        *sql.DB
+	sess      *session.Manager
+	loginRate *ratelimit.Limiter // nil ok
 }
 
 func NewAuthHandler(db *sql.DB, sess *session.Manager) *AuthHandler {
 	return &AuthHandler{db: db, sess: sess}
+}
+
+// WithRateLimit enables rate limiting on login / 2FA verify endpoints.
+func (h *AuthHandler) WithRateLimit(l *ratelimit.Limiter) *AuthHandler {
+	h.loginRate = l
+	return h
+}
+
+func clientIP(r *http.Request) string {
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
@@ -26,6 +42,14 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, M{"error": "invalid request"})
 		return
+	}
+
+	ip := clientIP(r)
+	if h.loginRate != nil {
+		if !h.loginRate.Allow("ip:"+ip) || !h.loginRate.Allow("login:"+req.Login) {
+			writeJSON(w, http.StatusTooManyRequests, M{"error": "too many attempts, try again later"})
+			return
+		}
 	}
 
 	var userID int64
@@ -40,6 +64,12 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)) != nil {
 		writeJSON(w, http.StatusUnauthorized, M{"error": "invalid credentials"})
 		return
+	}
+
+	// Successful auth: reset counters
+	if h.loginRate != nil {
+		h.loginRate.Reset("ip:" + ip)
+		h.loginRate.Reset("login:" + req.Login)
 	}
 
 	// Check if user has 2FA enabled

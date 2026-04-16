@@ -20,7 +20,7 @@ export default function NewPost() {
     setSubmitting(true)
     try {
       const html = renderMarkdown(body)
-      const { id } = await api.createPost(title, html, visibility)
+      const { id } = await api.createPost(title, html, visibility, body)
       nav(`/posts/${id}`)
     } finally {
       setSubmitting(false)

@@ -4,7 +4,9 @@ import { useAuth } from '../App'
 import { api } from '../api'
 import { usePWAInstall } from '../hooks/usePWAInstall'
 import { useTheme } from '../hooks/useTheme'
+import { useUnread } from '../hooks/useUnread'
 import Icon from './Icon'
+import TwoFABanner from './TwoFABanner'
 import './Layout.css'
 
 export default function Layout() {
@@ -13,6 +15,7 @@ export default function Layout() {
   const loc = useLocation()
   const { canInstall, install } = usePWAInstall()
   const { pref, cycle } = useTheme()
+  const { count: unreadCount } = useUnread()
   const [menuOpen, setMenuOpen] = useState(false)
 
   const logout = async () => {
@@ -42,6 +45,7 @@ export default function Layout() {
         <nav className={`topnav ${menuOpen ? 'open' : ''}`}>
           <Link to="/" className={`nav-item ${isActive('/')}`} onClick={close}>
             <Icon name="home" size={18} />タイムライン
+            {unreadCount > 0 && <span className="badge">{unreadCount}</span>}
           </Link>
           <Link to="/new" className={`nav-item ${isActive('/new')}`} onClick={close}>
             <Icon name="plus" size={18} />新しい日記
@@ -54,6 +58,9 @@ export default function Layout() {
           </Link>
           <Link to="/drafts" className={`nav-item ${isActive('/drafts')}`} onClick={close}>
             <Icon name="draft" size={18} />下書き
+          </Link>
+          <Link to="/media" className={`nav-item ${isActive('/media')}`} onClick={close}>
+            <Icon name="image" size={18} />メディア
           </Link>
           <Link to="/settings" className={`nav-item ${isActive('/settings')}`} onClick={close}>
             <Icon name="settings" size={18} />{user?.display_name}
@@ -70,12 +77,19 @@ export default function Layout() {
       </header>
 
       <main className="main-content">
+        <TwoFABanner />
         <Outlet />
       </main>
 
       {/* Mobile bottom nav */}
       <nav className="bottom-nav">
-        <Link to="/" className={isActive('/')}><Icon name="home" size={22} /><span>ホーム</span></Link>
+        <Link to="/" className={isActive('/')}>
+          <div style={{ position: 'relative' }}>
+            <Icon name="home" size={22} />
+            {unreadCount > 0 && <span className="badge-dot" />}
+          </div>
+          <span>ホーム</span>
+        </Link>
         <Link to="/search" className={isActive('/search')}><Icon name="search" size={22} /><span>検索</span></Link>
         <Link to="/new" className="new-btn"><Icon name="plus" size={24} /></Link>
         <Link to="/members" className={isActive('/members')}><Icon name="users" size={22} /><span>メンバー</span></Link>

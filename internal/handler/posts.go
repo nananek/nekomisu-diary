@@ -28,6 +28,7 @@ type postJSON struct {
 	AuthorAvatar *string `json:"author_avatar"`
 	Title       string  `json:"title"`
 	BodyHTML    string  `json:"body_html"`
+	BodyMD      *string `json:"body_md,omitempty"`
 	Visibility  string  `json:"visibility"`
 	PublishedAt *string `json:"published_at"`
 	CreatedAt   string  `json:"created_at"`
@@ -104,9 +105,10 @@ func (h *PostHandler) Get(w http.ResponseWriter, r *http.Request) {
 	var avatar sql.NullString
 	var pubAtNull sql.NullTime
 	var createdAt time.Time
+	var bodyMD sql.NullString
 	err := h.db.QueryRow(`
 		SELECT p.id, p.author_id, u.display_name, u.avatar_path,
-		       p.title, p.body_html, p.visibility,
+		       p.title, p.body_html, p.body_md, p.visibility,
 		       p.published_at, p.created_at,
 		       (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)
 		FROM posts p
@@ -114,7 +116,7 @@ func (h *PostHandler) Get(w http.ResponseWriter, r *http.Request) {
 		WHERE p.id = $1
 		  AND (p.visibility = 'public' OR (p.visibility = 'private' AND p.author_id = $2))`,
 		id, u.UserID).Scan(&p.ID, &p.AuthorID, &p.AuthorName, &avatar,
-		&p.Title, &p.BodyHTML, &p.Visibility,
+		&p.Title, &p.BodyHTML, &bodyMD, &p.Visibility,
 		&pubAtNull, &createdAt, &p.CommentCount)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, M{"error": "not found"})
@@ -126,15 +128,19 @@ func (h *PostHandler) Get(w http.ResponseWriter, r *http.Request) {
 		s := pubAtNull.Time.Format(time.RFC3339)
 		p.PublishedAt = &s
 	}
+	if bodyMD.Valid {
+		p.BodyMD = &bodyMD.String
+	}
 	writeJSON(w, http.StatusOK, p)
 }
 
 func (h *PostHandler) Create(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
 	var req struct {
-		Title      string `json:"title"`
-		Body       string `json:"body"`
-		Visibility string `json:"visibility"`
+		Title      string  `json:"title"`
+		Body       string  `json:"body"`
+		BodyMD     *string `json:"body_md"`
+		Visibility string  `json:"visibility"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, M{"error": "invalid request"})
@@ -156,10 +162,10 @@ func (h *PostHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	var id int64
 	err := h.db.QueryRow(`
-		INSERT INTO posts (author_id, title, body_html, visibility, published_at)
-		VALUES ($1, $2, $3, $4::post_visibility, $5)
+		INSERT INTO posts (author_id, title, body_html, body_md, visibility, published_at)
+		VALUES ($1, $2, $3, $4, $5::post_visibility, $6)
 		RETURNING id`,
-		u.UserID, req.Title, req.Body, req.Visibility, publishedAt,
+		u.UserID, req.Title, req.Body, req.BodyMD, req.Visibility, publishedAt,
 	).Scan(&id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
@@ -187,6 +193,7 @@ func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Title      *string `json:"title"`
 		Body       *string `json:"body"`
+		BodyMD     *string `json:"body_md"`
 		Visibility *string `json:"visibility"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -199,6 +206,9 @@ func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Body != nil {
 		h.db.Exec(`UPDATE posts SET body_html = $1 WHERE id = $2`, *req.Body, id)
+	}
+	if req.BodyMD != nil {
+		h.db.Exec(`UPDATE posts SET body_md = $1 WHERE id = $2`, *req.BodyMD, id)
 	}
 	newlyPublic := false
 	if req.Visibility != nil {

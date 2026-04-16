@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../api'
 import type { Post } from '../api'
 import Icon from '../components/Icon'
+import { useUnread } from '../hooks/useUnread'
 import './Timeline.css'
 
 export default function Timeline() {
@@ -10,11 +11,15 @@ export default function Timeline() {
   const [page, setPage] = useState(1)
   const [pages, setPages] = useState(1)
   const [loading, setLoading] = useState(true)
+  const { markSeen } = useUnread()
 
   useEffect(() => {
     setLoading(true)
-    api.posts(page).then(d => { setPosts(d.posts); setPages(d.pages) }).finally(() => setLoading(false))
-  }, [page])
+    api.posts(page)
+      .then(d => { setPosts(d.posts); setPages(d.pages) })
+      .then(() => markSeen())
+      .finally(() => setLoading(false))
+  }, [page, markSeen])
 
   if (loading) return <div className="loading">読み込み中...</div>
 

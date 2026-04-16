@@ -8,6 +8,7 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/pquerna/otp v1.5.0
 	golang.org/x/crypto v0.50.0
+	golang.org/x/image v0.39.0
 )
 
 require (

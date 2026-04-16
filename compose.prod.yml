@@ -53,6 +53,7 @@ services:
       - -discord-webhook=${DISCORD_WEBHOOK:-}
     volumes:
       - ./bin/server:/app/bin/server:ro
+      - ./bin/passwdreset:/app/bin/passwdreset:ro
       - ./web/dist:/app/web/dist:ro
       - ./uploads:/app/uploads
     network_mode: "service:tailscale"

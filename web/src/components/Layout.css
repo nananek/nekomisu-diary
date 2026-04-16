@@ -74,6 +74,31 @@
 .nav-logout { color: var(--danger); }
 .nav-logout:hover { background: rgba(217,79,92,0.1); }
 
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  margin-left: 4px;
+  background: var(--danger);
+  color: #fff;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.badge-dot {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
 button.nav-item {
   border: none;
   background: none;

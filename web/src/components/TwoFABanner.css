@@ -1,0 +1,33 @@
+.twofa-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin: 12px 0;
+  background: var(--accent-light);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--text-h);
+  flex-wrap: wrap;
+}
+
+.twofa-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--accent);
+}
+
+.twofa-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.twofa-actions .btn,
+.twofa-actions button {
+  font-size: 13px;
+  padding: 6px 12px;
+  min-height: auto;
+}

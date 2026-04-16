@@ -11,6 +11,7 @@ import (
 	"github.com/nananek/nekomisu-diary/internal/db"
 	"github.com/nananek/nekomisu-diary/internal/handler"
 	"github.com/nananek/nekomisu-diary/internal/notifier"
+	"github.com/nananek/nekomisu-diary/internal/ratelimit"
 	"github.com/nananek/nekomisu-diary/internal/session"
 )
 
@@ -44,7 +45,16 @@ func main() {
 		log.Printf("Discord notifier enabled")
 	}
 
-	auth := handler.NewAuthHandler(pool, sess)
+	// Login: 10 attempts per 10 minutes per IP + per login name
+	loginRate := ratelimit.New(10, 10*time.Minute)
+	go func() {
+		for {
+			loginRate.Cleanup()
+			time.Sleep(5 * time.Minute)
+		}
+	}()
+
+	auth := handler.NewAuthHandler(pool, sess).WithRateLimit(loginRate)
 	posts := handler.NewPostHandler(pool, disc)
 	comments := handler.NewCommentHandler(pool, disc)
 	totpH := handler.NewTOTPHandler(pool, sess)
@@ -55,6 +65,7 @@ func main() {
 	}
 
 	members := handler.NewMemberHandler(pool)
+	unread := handler.NewUnreadHandler(pool)
 
 	var mediaH *handler.MediaHandler
 	if *uploadsDir != "" {
@@ -104,6 +115,10 @@ func main() {
 	// Members
 	mux.Handle("GET /api/members", requireAuth(http.HandlerFunc(members.List)))
 
+	// Unread / read markers
+	mux.Handle("GET /api/unread", requireAuth(http.HandlerFunc(unread.Count)))
+	mux.Handle("POST /api/unread/mark-seen", requireAuth(http.HandlerFunc(unread.MarkSeen)))
+
 	// Comments (session required)
 	mux.Handle("GET /api/posts/{id}/comments", requireAuth(http.HandlerFunc(comments.List)))
 	mux.Handle("POST /api/posts/{id}/comments", requireAuth(http.HandlerFunc(comments.Create)))
@@ -112,6 +127,8 @@ func main() {
 	// Media
 	if mediaH != nil {
 		mux.Handle("POST /api/media/upload", requireAuth(http.HandlerFunc(mediaH.Upload)))
+		mux.Handle("GET /api/media", requireAuth(http.HandlerFunc(mediaH.List)))
+		mux.Handle("DELETE /api/media/{id}", requireAuth(http.HandlerFunc(mediaH.Delete)))
 		mux.Handle("POST /api/auth/avatar", requireAuth(http.HandlerFunc(mediaH.UploadAvatar)))
 	}
 

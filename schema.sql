@@ -27,6 +27,7 @@ CREATE TABLE posts (
   author_id     BIGINT      NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   title         TEXT        NOT NULL,
   body_html     TEXT        NOT NULL,
+  body_md       TEXT,
   body_source   TEXT,
   visibility    post_visibility NOT NULL DEFAULT 'public',
   published_at  TIMESTAMPTZ,
@@ -64,6 +65,7 @@ CREATE TABLE media (
   uploader_id       BIGINT      REFERENCES users(id) ON DELETE SET NULL,
   filename          TEXT        NOT NULL,
   storage_path      TEXT        NOT NULL UNIQUE,  -- e.g. 2025/06/foo.jpg
+  thumbnail_path    TEXT,                          -- e.g. 2025/06/foo-thumb.jpg (800w)
   mime_type         TEXT        NOT NULL,
   byte_size         BIGINT,
   width             INT,
@@ -85,6 +87,11 @@ CREATE TABLE sessions (
 
 CREATE INDEX sessions_user_idx    ON sessions (user_id);
 CREATE INDEX sessions_expires_idx ON sessions (expires_at);
+
+CREATE TABLE read_markers (
+  user_id       BIGINT      PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  posts_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 CREATE TABLE totp_secrets (
   user_id     BIGINT      PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
