@@ -1,0 +1,17 @@
+# Build the TUI client into a small, self-contained image.
+# Build context must be the repository root.
+
+FROM golang:1.25-alpine AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY internal ./internal
+COPY cmd/diary-tui ./cmd/diary-tui
+RUN CGO_ENABLED=0 go build -ldflags='-s -w' -o /out/diary-tui ./cmd/diary-tui/
+
+FROM alpine:latest
+RUN apk add --no-cache ca-certificates tzdata
+COPY --from=builder /out/diary-tui /usr/local/bin/diary-tui
+ENV XDG_CONFIG_HOME=/config
+VOLUME ["/config"]
+ENTRYPOINT ["/usr/local/bin/diary-tui"]

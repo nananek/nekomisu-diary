@@ -1,0 +1,29 @@
+#!/bin/sh
+# Run the TUI client in Docker, with:
+#   - --tty / --interactive      (bubbletea needs a real terminal)
+#   - --network=host             (to resolve Tailscale MagicDNS & reach tailnet)
+#   - named volume for session   (survives container removal)
+#
+# Build once (or after pulls):
+#   docker build -f Dockerfile.tui -t diary-tui:latest .
+#
+# Run:
+#   ./ops/tui
+
+set -eu
+
+IMAGE="${DIARY_TUI_IMAGE:-diary-tui:latest}"
+VOLUME="${DIARY_TUI_VOLUME:-diary-tui-session}"
+
+# Build if image missing
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  echo "Image $IMAGE not found; building..."
+  cd "$(dirname "$0")/.."
+  docker build -f Dockerfile.tui -t "$IMAGE" .
+fi
+
+exec docker run -it --rm \
+  --network=host \
+  -v "$VOLUME:/config" \
+  -e TERM="${TERM:-xterm-256color}" \
+  "$IMAGE" "$@"
