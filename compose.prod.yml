@@ -37,7 +37,9 @@ services:
       - POSTGRES_INITDB_ARGS=--locale=C.UTF-8 --encoding=UTF8
     volumes:
       - pg-data:/var/lib/postgresql/data
-      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      # Bundled deploys inject the full DB dump as an initdb mount here
+      # (see ops/bundle.sh); fresh deploys start with an empty DB and
+      # let the server run migrations on first boot.
     network_mode: "service:tailscale"
 
   server:

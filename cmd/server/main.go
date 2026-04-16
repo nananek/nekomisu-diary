@@ -11,6 +11,7 @@ import (
 
 	"github.com/nananek/nekomisu-diary/internal/db"
 	"github.com/nananek/nekomisu-diary/internal/handler"
+	"github.com/nananek/nekomisu-diary/internal/migrate"
 	"github.com/nananek/nekomisu-diary/internal/notifier"
 	"github.com/nananek/nekomisu-diary/internal/ratelimit"
 	"github.com/nananek/nekomisu-diary/internal/session"
@@ -27,6 +28,7 @@ func main() {
 	cookieSecure := flag.Bool("cookie-secure", true, "Set Secure flag on session cookies (HTTPS only). Turn off for plain-HTTP local dev.")
 	allowRegistration := flag.Bool("allow-registration", false, "Allow unauthenticated POST /api/auth/register. Off by default.")
 	maxBodyBytes := flag.Int64("max-body-bytes", 1<<20, "Maximum JSON request body size in bytes")
+	autoMigrate := flag.Bool("auto-migrate", true, "Run pending migrations on startup")
 	flag.Parse()
 
 	if *pgDSN == "" {
@@ -38,6 +40,13 @@ func main() {
 		log.Fatalf("db: %v", err)
 	}
 	defer pool.Close()
+
+	if *autoMigrate {
+		log.Printf("Running pending migrations...")
+		if err := migrate.Up(pool); err != nil {
+			log.Fatalf("migrate: %v", err)
+		}
+	}
 
 	sess := session.NewManager(pool).WithSecureCookies(*cookieSecure)
 

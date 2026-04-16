@@ -10,12 +10,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	_ "github.com/lib/pq"
+	"github.com/nananek/nekomisu-diary/internal/migrate"
 )
 
 // adminDSN points to the test postgres instance. TEST_PG_DSN is required;
@@ -52,19 +51,14 @@ func NewDB(t *testing.T) *sql.DB {
 		t.Fatalf("create db: %v", err)
 	}
 
-	// Load schema into the new DB
+	// Load schema via migrations into the new DB
 	targetDSN := strings.Replace(adminDSN(), "/diary?", "/"+dbName+"?", 1)
 	db, err := sql.Open("postgres", targetDSN)
 	if err != nil {
 		t.Fatalf("target open: %v", err)
 	}
-
-	schema, err := os.ReadFile(findSchema(t))
-	if err != nil {
-		t.Fatalf("read schema: %v", err)
-	}
-	if _, err := db.Exec(string(schema)); err != nil {
-		t.Fatalf("load schema: %v", err)
+	if err := migrate.Up(db); err != nil {
+		t.Fatalf("migrate: %v", err)
 	}
 
 	t.Cleanup(func() {
@@ -83,25 +77,6 @@ func NewDB(t *testing.T) *sql.DB {
 	})
 
 	return db
-}
-
-// findSchema walks up from the current source file to find schema.sql.
-func findSchema(t *testing.T) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
-	}
-	dir := filepath.Dir(file)
-	for i := 0; i < 6; i++ {
-		candidate := filepath.Join(dir, "schema.sql")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-		dir = filepath.Dir(dir)
-	}
-	t.Fatal("schema.sql not found")
-	return ""
 }
 
 // InsertUser is a convenience helper to create a test user directly in DB.

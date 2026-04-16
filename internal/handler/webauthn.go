@@ -79,7 +79,10 @@ func (h *WebAuthnHandler) loadUser(userID int64) (*waUser, error) {
 	}
 	u := &waUser{id: userID, name: login, displayName: displayName}
 
-	rows, err := h.db.Query(`SELECT id, public_key, attestation_type, sign_count, transports FROM webauthn_credentials WHERE user_id = $1`, userID)
+	rows, err := h.db.Query(`
+		SELECT id, public_key, attestation_type, sign_count, transports,
+		       flag_backup_eligible, flag_backup_state
+		FROM webauthn_credentials WHERE user_id = $1`, userID)
 	if err != nil {
 		return u, nil
 	}
@@ -90,7 +93,11 @@ func (h *WebAuthnHandler) loadUser(userID int64) (*waUser, error) {
 		var credID string
 		var attType sql.NullString
 		var transports []string
-		if err := rows.Scan(&credID, &cred.PublicKey, &attType, &cred.Authenticator.SignCount, (*pgTextArray)(&transports)); err != nil {
+		var beFlag, bsFlag bool
+		if err := rows.Scan(
+			&credID, &cred.PublicKey, &attType, &cred.Authenticator.SignCount,
+			(*pgTextArray)(&transports), &beFlag, &bsFlag,
+		); err != nil {
 			continue
 		}
 		cred.ID = decodeCredID(credID)
@@ -100,6 +107,8 @@ func (h *WebAuthnHandler) loadUser(userID int64) (*waUser, error) {
 		for _, t := range transports {
 			cred.Transport = append(cred.Transport, protocol.AuthenticatorTransport(t))
 		}
+		cred.Flags.BackupEligible = beFlag
+		cred.Flags.BackupState = bsFlag
 		u.credentials = append(u.credentials, cred)
 	}
 	return u, nil
@@ -209,10 +218,13 @@ func (h *WebAuthnHandler) RegisterFinish(w http.ResponseWriter, r *http.Request)
 	}
 
 	_, err = h.db.Exec(`
-		INSERT INTO webauthn_credentials (id, user_id, name, public_key, attestation_type, sign_count, transports)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		INSERT INTO webauthn_credentials
+		  (id, user_id, name, public_key, attestation_type, sign_count,
+		   transports, flag_backup_eligible, flag_backup_state)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		encodeCredID(cred.ID), u.UserID, name, cred.PublicKey, cred.AttestationType,
 		cred.Authenticator.SignCount, (*pgTextArray)(&transports),
+		cred.Flags.BackupEligible, cred.Flags.BackupState,
 	)
 	if err != nil {
 		log.Printf("webauthn insert: %v", err)

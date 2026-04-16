@@ -1,14 +1,11 @@
--- ねこのみすきー交換日記 / 独自システム スキーマ (PostgreSQL)
--- 設計方針:
---   * クローズドな少人数SNS的日記。投稿・コメント・添付・ユーザーのみを持つ。
---   * カテゴリ/タグはWP上で実質未使用のため移植しない。
---   * 投稿本文は移行時にGutenbergブロック→HTMLへ正規化したものを body_html に格納し、
---     念のため元のブロック形式を body_source に保存（後で再変換可能にする）。
---   * 移行追跡用に wp_*_id を各テーブルに残す（移行後に DROP COLUMN 可能）。
+-- +goose Up
+-- Initial schema. Idempotent so existing databases (dev/staging that
+-- predate this migration framework) can safely be brought under management
+-- without failing.
 
 SET client_encoding = 'UTF8';
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
   id            BIGSERIAL PRIMARY KEY,
   login         TEXT        NOT NULL UNIQUE,
   email         TEXT        NOT NULL UNIQUE,
@@ -20,9 +17,22 @@ CREATE TABLE users (
   wp_user_id    BIGINT      UNIQUE
 );
 
-CREATE TYPE post_visibility AS ENUM ('public', 'private', 'draft');
+-- +goose StatementBegin
+DO $$ BEGIN
+  CREATE TYPE post_visibility AS ENUM ('public', 'private', 'draft');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- +goose StatementEnd
 
-CREATE TABLE posts (
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION set_updated_at() RETURNS TRIGGER AS $func$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$func$ LANGUAGE plpgsql;
+-- +goose StatementEnd
+
+CREATE TABLE IF NOT EXISTS posts (
   id            BIGSERIAL PRIMARY KEY,
   author_id     BIGINT      NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   title         TEXT        NOT NULL,
@@ -35,19 +45,19 @@ CREATE TABLE posts (
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   wp_post_id    BIGINT      UNIQUE
 );
-
-CREATE INDEX posts_author_published_idx
+-- Catch older DBs that predate body_md
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS body_md TEXT;
+CREATE INDEX IF NOT EXISTS posts_author_published_idx
   ON posts (author_id, published_at DESC NULLS LAST);
-
-CREATE INDEX posts_public_published_idx
+CREATE INDEX IF NOT EXISTS posts_public_published_idx
   ON posts (published_at DESC NULLS LAST)
   WHERE visibility = 'public';
 
-CREATE TABLE comments (
+CREATE TABLE IF NOT EXISTS comments (
   id             BIGSERIAL PRIMARY KEY,
   post_id        BIGINT      NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
   author_id      BIGINT      REFERENCES users(id) ON DELETE SET NULL,
-  author_name    TEXT,                          -- author_id NULL 時の表示用 (匿名コメント)
+  author_name    TEXT,
   body           TEXT        NOT NULL,
   parent_id      BIGINT      REFERENCES comments(id) ON DELETE CASCADE,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -56,16 +66,15 @@ CREATE TABLE comments (
     author_id IS NOT NULL OR author_name IS NOT NULL
   )
 );
+CREATE INDEX IF NOT EXISTS comments_post_idx   ON comments (post_id, created_at);
+CREATE INDEX IF NOT EXISTS comments_parent_idx ON comments (parent_id) WHERE parent_id IS NOT NULL;
 
-CREATE INDEX comments_post_idx     ON comments (post_id, created_at);
-CREATE INDEX comments_parent_idx   ON comments (parent_id) WHERE parent_id IS NOT NULL;
-
-CREATE TABLE media (
+CREATE TABLE IF NOT EXISTS media (
   id                BIGSERIAL PRIMARY KEY,
   uploader_id       BIGINT      REFERENCES users(id) ON DELETE SET NULL,
   filename          TEXT        NOT NULL,
-  storage_path      TEXT        NOT NULL UNIQUE,  -- e.g. 2025/06/foo.jpg
-  thumbnail_path    TEXT,                          -- e.g. 2025/06/foo-thumb.jpg (800w)
+  storage_path      TEXT        NOT NULL UNIQUE,
+  thumbnail_path    TEXT,
   mime_type         TEXT        NOT NULL,
   byte_size         BIGINT,
   width             INT,
@@ -74,33 +83,33 @@ CREATE TABLE media (
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   wp_attachment_id  BIGINT      UNIQUE
 );
+ALTER TABLE media ADD COLUMN IF NOT EXISTS thumbnail_path TEXT;
+CREATE INDEX IF NOT EXISTS media_post_idx ON media (attached_post_id) WHERE attached_post_id IS NOT NULL;
 
-CREATE INDEX media_post_idx ON media (attached_post_id) WHERE attached_post_id IS NOT NULL;
-
-CREATE TABLE sessions (
+CREATE TABLE IF NOT EXISTS sessions (
   id          TEXT        PRIMARY KEY,
   user_id     BIGINT      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   verified    BOOLEAN     NOT NULL DEFAULT true,
   expires_at  TIMESTAMPTZ NOT NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS verified BOOLEAN NOT NULL DEFAULT true;
+CREATE INDEX IF NOT EXISTS sessions_user_idx    ON sessions (user_id);
+CREATE INDEX IF NOT EXISTS sessions_expires_idx ON sessions (expires_at);
 
-CREATE INDEX sessions_user_idx    ON sessions (user_id);
-CREATE INDEX sessions_expires_idx ON sessions (expires_at);
-
-CREATE TABLE read_markers (
+CREATE TABLE IF NOT EXISTS read_markers (
   user_id       BIGINT      PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   posts_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE totp_secrets (
+CREATE TABLE IF NOT EXISTS totp_secrets (
   user_id     BIGINT      PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   secret      TEXT        NOT NULL,
   verified    BOOLEAN     NOT NULL DEFAULT false,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE webauthn_credentials (
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
   id              TEXT        PRIMARY KEY,
   user_id         BIGINT      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name            TEXT        NOT NULL DEFAULT '',
@@ -111,19 +120,24 @@ CREATE TABLE webauthn_credentials (
   transports      TEXT[],
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS webauthn_user_idx ON webauthn_credentials (user_id);
 
-CREATE INDEX webauthn_user_idx ON webauthn_credentials (user_id);
-
--- updated_at 自動更新トリガ
-CREATE OR REPLACE FUNCTION set_updated_at() RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = NOW();
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
+DROP TRIGGER IF EXISTS users_updated_at ON users;
 CREATE TRIGGER users_updated_at BEFORE UPDATE ON users
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS posts_updated_at ON posts;
 CREATE TRIGGER posts_updated_at BEFORE UPDATE ON posts
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- +goose Down
+DROP TABLE IF EXISTS webauthn_credentials;
+DROP TABLE IF EXISTS totp_secrets;
+DROP TABLE IF EXISTS read_markers;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS media;
+DROP TABLE IF EXISTS comments;
+DROP TABLE IF EXISTS posts;
+DROP TABLE IF EXISTS users;
+DROP TYPE IF EXISTS post_visibility;
+DROP FUNCTION IF EXISTS set_updated_at();

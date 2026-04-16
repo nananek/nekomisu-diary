@@ -86,17 +86,18 @@ else
   echo "    (no state at $TS_STATE_SRC; bundle will require fresh TS_AUTHKEY)"
 fi
 
-echo "==> rewriting compose.prod.yml for bundle layout"
-# Swap the schema.sql initdb mount for the full pg_dump (postgres initdb
-# auto-loads .sql.gz). tailscale_state is already relative (./).
+echo "==> injecting DB dump into compose.prod.yml postgres initdb"
+# Insert the data/diary.sql.gz mount after the pg-data volume line so the
+# postgres container auto-loads the dump on first boot of a fresh volume.
 python3 - "$STAGE/compose.prod.yml" <<'PY'
 import sys, re
 p = sys.argv[1]
 t = open(p).read()
 t = re.sub(
-    r"\s*- \./schema\.sql:/docker-entrypoint-initdb\.d/01-schema\.sql:ro",
-    "\n      - ./data/diary.sql.gz:/docker-entrypoint-initdb.d/01-diary.sql.gz:ro",
+    r"(      - pg-data:/var/lib/postgresql/data)",
+    r"\1\n      - ./data/diary.sql.gz:/docker-entrypoint-initdb.d/01-diary.sql.gz:ro",
     t,
+    count=1,
 )
 open(p, "w").write(t)
 PY
