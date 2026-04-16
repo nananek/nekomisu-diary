@@ -42,6 +42,10 @@ func NewWebAuthnHandler(db *sql.DB, sess *session.Manager, rpID, rpOrigin string
 		RPDisplayName: "Exchange Diary",
 		RPID:          rpID,
 		RPOrigins:     []string{rpOrigin},
+		AuthenticatorSelection: protocol.AuthenticatorSelection{
+			ResidentKey:        protocol.ResidentKeyRequirementPreferred,
+			UserVerification:   protocol.VerificationPreferred,
+		},
 	})
 	if err != nil {
 		return nil, err
