@@ -46,11 +46,15 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+html, body, #root {
+  height: 100%;
+}
 body {
   font: 15px/1.7 var(--sans);
   color: var(--text);
   background: var(--bg);
   -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
 }
 
 a { color: var(--accent); text-decoration: none; }
