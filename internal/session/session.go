@@ -1,11 +1,15 @@
 package session
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"time"
+
+	"github.com/nananek/nekomisu-diary/internal/dbq"
 )
 
 const (
@@ -15,12 +19,13 @@ const (
 )
 
 type Manager struct {
-	db     *sql.DB
+	q      *dbq.Queries
+	db     *sql.DB // retained for Cleanup's raw exec; dbq generates this too
 	secure bool
 }
 
 func NewManager(db *sql.DB) *Manager {
-	return &Manager{db: db}
+	return &Manager{db: db, q: dbq.New(db)}
 }
 
 // WithSecureCookies marks the session cookie as Secure so browsers only
@@ -51,11 +56,12 @@ func (m *Manager) Create(w http.ResponseWriter, userID int64, verified bool) err
 		ttl = PendingTTL
 	}
 	expires := time.Now().Add(ttl)
-	_, err = m.db.Exec(
-		`INSERT INTO sessions (id, user_id, verified, expires_at) VALUES ($1, $2, $3, $4)`,
-		id, userID, verified, expires,
-	)
-	if err != nil {
+	if err := m.q.CreateSession(context.Background(), dbq.CreateSessionParams{
+		ID:        id,
+		UserID:    userID,
+		Verified:  verified,
+		ExpiresAt: expires,
+	}); err != nil {
 		return err
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -75,11 +81,10 @@ func (m *Manager) Verify(r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	_, err = m.db.Exec(
-		`UPDATE sessions SET verified = true, expires_at = $1 WHERE id = $2`,
-		time.Now().Add(TTL), c.Value,
-	)
-	return err
+	return m.q.VerifySession(r.Context(), dbq.VerifySessionParams{
+		ExpiresAt: time.Now().Add(TTL),
+		ID:        c.Value,
+	})
 }
 
 // Get returns user info only for fully verified sessions.
@@ -97,29 +102,33 @@ func (m *Manager) get(r *http.Request, verified bool) (*UserInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	var info UserInfo
-	err = m.db.QueryRow(`
-		SELECT s.user_id, u.login, u.display_name, u.avatar_path,
-		       EXISTS(SELECT 1 FROM totp_secrets WHERE user_id = u.id AND verified = true) AS has_totp,
-		       EXISTS(SELECT 1 FROM webauthn_credentials WHERE user_id = u.id) AS has_webauthn
-		FROM sessions s
-		JOIN users u ON u.id = s.user_id
-		WHERE s.id = $1 AND s.expires_at > NOW() AND s.verified = $2`,
-		c.Value, verified,
-	).Scan(&info.UserID, &info.Login, &info.DisplayName, &info.AvatarPath, &info.HasTOTP, &info.HasWebAuthn)
+	row, err := m.q.GetSession(r.Context(), dbq.GetSessionParams{
+		ID:       c.Value,
+		Verified: verified,
+	})
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
 		return nil, err
 	}
+	info := &UserInfo{
+		UserID:      row.UserID,
+		Login:       row.Login,
+		DisplayName: row.DisplayName,
+		AvatarPath:  row.AvatarPath,
+		HasTOTP:     row.HasTotp,
+		HasWebAuthn: row.HasWebauthn,
+	}
 	info.Has2FA = info.HasTOTP || info.HasWebAuthn
-	return &info, nil
+	return info, nil
 }
 
 func (m *Manager) Destroy(w http.ResponseWriter, r *http.Request) {
 	c, err := r.Cookie(CookieName)
-	if err != nil {
-		return
+	if err == nil {
+		_ = m.q.DeleteSession(r.Context(), c.Value)
 	}
-	m.db.Exec(`DELETE FROM sessions WHERE id = $1`, c.Value)
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,
 		Value:    "",
@@ -132,7 +141,7 @@ func (m *Manager) Destroy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Manager) Cleanup() {
-	m.db.Exec(`DELETE FROM sessions WHERE expires_at < NOW()`)
+	_ = m.q.DeleteExpiredSessions(context.Background())
 }
 
 func generateID() (string, error) {

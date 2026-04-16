@@ -5,19 +5,20 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/nananek/nekomisu-diary/internal/dbq"
 	"github.com/nananek/nekomisu-diary/internal/ratelimit"
 	"github.com/nananek/nekomisu-diary/internal/session"
 	"github.com/pquerna/otp/totp"
 )
 
 type TOTPHandler struct {
-	db   *sql.DB
+	q    *dbq.Queries
 	sess *session.Manager
-	rate *ratelimit.Limiter // nil ok; limits Verify2FA per login name
+	rate *ratelimit.Limiter
 }
 
 func NewTOTPHandler(db *sql.DB, sess *session.Manager) *TOTPHandler {
-	return &TOTPHandler{db: db, sess: sess}
+	return &TOTPHandler{q: dbq.New(db), sess: sess}
 }
 
 func (h *TOTPHandler) WithRateLimit(l *ratelimit.Limiter) *TOTPHandler {
@@ -25,14 +26,12 @@ func (h *TOTPHandler) WithRateLimit(l *ratelimit.Limiter) *TOTPHandler {
 	return h
 }
 
-// Setup generates a new TOTP secret and returns the provisioning URI.
 func (h *TOTPHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
 	if u == nil {
 		writeJSON(w, http.StatusUnauthorized, M{"error": "not logged in"})
 		return
 	}
-
 	key, err := totp.Generate(totp.GenerateOpts{
 		Issuer:      "Exchange Diary",
 		AccountName: u.Login,
@@ -41,116 +40,82 @@ func (h *TOTPHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "totp generation failed"})
 		return
 	}
-
-	// Upsert: replace any existing secret atomically so a failed insert
-	// doesn't leave the user without a TOTP secret.
-	_, err = h.db.Exec(`
-		INSERT INTO totp_secrets (user_id, secret, verified)
-		VALUES ($1, $2, false)
-		ON CONFLICT (user_id) DO UPDATE SET secret = EXCLUDED.secret, verified = false`,
-		u.UserID, key.Secret(),
-	)
-	if err != nil {
+	if err := h.q.UpsertTOTPSecret(r.Context(), dbq.UpsertTOTPSecretParams{
+		UserID: u.UserID,
+		Secret: key.Secret(),
+	}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
 		return
 	}
-
-	writeJSON(w, http.StatusOK, M{
-		"secret": key.Secret(),
-		"url":    key.URL(),
-	})
+	writeJSON(w, http.StatusOK, M{"secret": key.Secret(), "url": key.URL()})
 }
 
-// Confirm verifies the code and marks the TOTP secret as active.
 func (h *TOTPHandler) Confirm(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
 	if u == nil {
 		writeJSON(w, http.StatusUnauthorized, M{"error": "not logged in"})
 		return
 	}
-
-	var req struct {
-		Code string `json:"code"`
-	}
+	var req struct{ Code string `json:"code"` }
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, M{"error": "invalid request"})
 		return
 	}
-
-	var secret string
-	err := h.db.QueryRow(
-		`SELECT secret FROM totp_secrets WHERE user_id = $1 AND verified = false`, u.UserID,
-	).Scan(&secret)
+	secret, err := h.q.GetUnverifiedTOTPSecret(r.Context(), u.UserID)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, M{"error": "no pending TOTP setup"})
 		return
 	}
-
 	if !totp.Validate(req.Code, secret) {
 		writeJSON(w, http.StatusUnauthorized, M{"error": "invalid code"})
 		return
 	}
-
-	_, err = h.db.Exec(`UPDATE totp_secrets SET verified = true WHERE user_id = $1`, u.UserID)
-	logIfErr("totp.Confirm.update", err)
+	if err := h.q.ConfirmTOTP(r.Context(), u.UserID); err != nil {
+		logIfErr("totp.Confirm.update", err)
+	}
 	writeJSON(w, http.StatusOK, M{"ok": true})
 }
 
-// Disable removes the TOTP secret.
 func (h *TOTPHandler) Disable(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
 	if u == nil {
 		writeJSON(w, http.StatusUnauthorized, M{"error": "not logged in"})
 		return
 	}
-
-	_, err := h.db.Exec(`DELETE FROM totp_secrets WHERE user_id = $1`, u.UserID)
-	logIfErr("totp.Disable", err)
+	logIfErr("totp.Disable", h.q.DisableTOTP(r.Context(), u.UserID))
 	writeJSON(w, http.StatusOK, M{"ok": true})
 }
 
-// Verify2FA is called during login to complete the 2FA step.
 func (h *TOTPHandler) Verify2FA(w http.ResponseWriter, r *http.Request) {
 	u, err := h.sess.GetPending(r)
 	if err != nil || u == nil {
 		writeJSON(w, http.StatusUnauthorized, M{"error": "no pending 2FA session"})
 		return
 	}
-
 	if h.rate != nil {
 		if !h.rate.Allow("2fa:"+u.Login) || !h.rate.Allow("2fa-ip:"+clientIP(r)) {
 			writeJSON(w, http.StatusTooManyRequests, M{"error": "too many attempts, try again later"})
 			return
 		}
 	}
-
-	var req struct {
-		Code string `json:"code"`
-	}
+	var req struct{ Code string `json:"code"` }
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, M{"error": "invalid request"})
 		return
 	}
-
-	var secret string
-	err = h.db.QueryRow(
-		`SELECT secret FROM totp_secrets WHERE user_id = $1 AND verified = true`, u.UserID,
-	).Scan(&secret)
+	secret, err := h.q.GetVerifiedTOTPSecret(r.Context(), u.UserID)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, M{"error": "TOTP not configured"})
 		return
 	}
-
 	if !totp.Validate(req.Code, secret) {
 		writeJSON(w, http.StatusUnauthorized, M{"error": "invalid code"})
 		return
 	}
-
 	if err := h.sess.Verify(r); err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "session error"})
 		return
 	}
-	// Success — clear the 2FA counters
 	if h.rate != nil {
 		h.rate.Reset("2fa:" + u.Login)
 		h.rate.Reset("2fa-ip:" + clientIP(r))

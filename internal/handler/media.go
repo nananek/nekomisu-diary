@@ -16,101 +16,80 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nananek/nekomisu-diary/internal/dbq"
 	"golang.org/x/image/draw"
 )
 
 type MediaHandler struct {
-	db         *sql.DB
+	q          *dbq.Queries
 	uploadsDir string
 }
 
 func NewMediaHandler(db *sql.DB, uploadsDir string) *MediaHandler {
-	return &MediaHandler{db: db, uploadsDir: uploadsDir}
+	return &MediaHandler{q: dbq.New(db), uploadsDir: uploadsDir}
 }
 
-// List returns media uploaded by the current user.
 func (h *MediaHandler) List(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
 	if u == nil {
 		writeJSON(w, http.StatusUnauthorized, M{"error": "not logged in"})
 		return
 	}
-
-	rows, err := h.db.Query(`
-		SELECT id, filename, storage_path, thumbnail_path, mime_type, byte_size, width, height, created_at
-		FROM media
-		WHERE uploader_id = $1
-		ORDER BY created_at DESC
-		LIMIT 200`, u.UserID)
+	uploader := sql.NullInt64{Int64: u.UserID, Valid: true}
+	rows, err := h.q.ListMediaByUploader(r.Context(), uploader)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
 		return
 	}
-	defer rows.Close()
-
-	items := make([]M, 0)
-	for rows.Next() {
-		var id int64
-		var filename, storagePath, mimeType, createdAt string
-		var thumbPath sql.NullString
-		var byteSize sql.NullInt64
-		var width, height sql.NullInt64
-		if rows.Scan(&id, &filename, &storagePath, &thumbPath, &mimeType, &byteSize, &width, &height, &createdAt) != nil {
-			continue
+	items := make([]M, 0, len(rows))
+	for _, rr := range rows {
+		item := M{
+			"id":         rr.ID,
+			"filename":   rr.Filename,
+			"url":        "/uploads/" + rr.StoragePath,
+			"mime_type":  rr.MimeType,
+			"created_at": rr.CreatedAt,
 		}
-		m := M{
-			"id":           id,
-			"filename":     filename,
-			"url":          "/uploads/" + storagePath,
-			"mime_type":    mimeType,
-			"created_at":   createdAt,
+		if rr.ThumbnailPath.Valid {
+			item["thumbnail_url"] = "/uploads/" + rr.ThumbnailPath.String
 		}
-		if thumbPath.Valid {
-			m["thumbnail_url"] = "/uploads/" + thumbPath.String
+		if rr.ByteSize.Valid {
+			item["byte_size"] = rr.ByteSize.Int64
 		}
-		if byteSize.Valid {
-			m["byte_size"] = byteSize.Int64
+		if rr.Width.Valid {
+			item["width"] = rr.Width.Int32
 		}
-		if width.Valid {
-			m["width"] = width.Int64
+		if rr.Height.Valid {
+			item["height"] = rr.Height.Int32
 		}
-		if height.Valid {
-			m["height"] = height.Int64
-		}
-		items = append(items, m)
+		items = append(items, item)
 	}
 	writeJSON(w, http.StatusOK, M{"items": items})
 }
 
-// Delete removes the uploader's own media file (DB + file on disk).
 func (h *MediaHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
 	if u == nil {
 		writeJSON(w, http.StatusUnauthorized, M{"error": "not logged in"})
 		return
 	}
-
 	var mediaID int64
 	fmt.Sscanf(r.PathValue("id"), "%d", &mediaID)
 
-	var storagePath string
-	var thumbPath sql.NullString
-	err := h.db.QueryRow(
-		`SELECT storage_path, thumbnail_path FROM media WHERE id = $1 AND uploader_id = $2`,
-		mediaID, u.UserID,
-	).Scan(&storagePath, &thumbPath)
+	uploader := sql.NullInt64{Int64: u.UserID, Valid: true}
+	info, err := h.q.GetMediaForDelete(r.Context(), dbq.GetMediaForDeleteParams{
+		ID:         mediaID,
+		UploaderID: uploader,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusForbidden, M{"error": "forbidden or not found"})
 		return
 	}
-
-	h.db.Exec(`DELETE FROM media WHERE id = $1`, mediaID)
-	// Best-effort file removal
-	os.Remove(filepath.Join(h.uploadsDir, storagePath))
-	if thumbPath.Valid {
-		os.Remove(filepath.Join(h.uploadsDir, thumbPath.String))
+	logIfErr("media.Delete", h.q.DeleteMedia(r.Context(), mediaID))
+	os.Remove(filepath.Join(h.uploadsDir, info.StoragePath))
+	if info.ThumbnailPath.Valid {
+		os.Remove(filepath.Join(h.uploadsDir, info.ThumbnailPath.String))
 	}
-
 	writeJSON(w, http.StatusOK, M{"ok": true})
 }
 
@@ -121,7 +100,7 @@ func (h *MediaHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, 64<<20) // 64MB
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<20)
 	if err := r.ParseMultipartForm(64 << 20); err != nil {
 		writeJSON(w, http.StatusBadRequest, M{"error": "file too large or invalid form"})
 		return
@@ -173,16 +152,14 @@ func (h *MediaHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "file create error"})
 		return
 	}
-	defer out.Close()
-
 	written, err := io.Copy(out, file)
 	if err != nil {
+		out.Close()
 		writeJSON(w, http.StatusInternalServerError, M{"error": "file write error"})
 		return
 	}
 	out.Close()
 
-	// Decode, strip metadata (EXIF etc.) by re-encoding, and generate thumbnail.
 	var width, height int
 	var thumbnailPath sql.NullString
 	if img, format, err := decodeImage(absPath); err == nil {
@@ -190,15 +167,12 @@ func (h *MediaHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		width = bounds.Dx()
 		height = bounds.Dy()
 		if format == "jpeg" {
-			// Re-encode over the original file to strip EXIF / thumbnails / GPS.
 			if err := writeJPEG(img, absPath, 95); err == nil {
 				if st, err := os.Stat(absPath); err == nil {
 					written = st.Size()
 				}
 			}
 		}
-		// PNG doesn't typically carry EXIF; keep original. (tEXt chunks are
-		// usually harmless, and re-encoding would re-compress and change CRCs.)
 		if format == "jpeg" || format == "png" {
 			thumbRel := strings.TrimSuffix(storagePath, filepath.Ext(storagePath)) + "-thumb.jpg"
 			thumbAbs := filepath.Join(h.uploadsDir, thumbRel)
@@ -209,37 +183,90 @@ func (h *MediaHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	postIDStr := r.FormValue("post_id")
-	var attachedPostID sql.NullInt64
+	var attached sql.NullInt64
 	if postIDStr != "" {
 		var pid int64
 		fmt.Sscanf(postIDStr, "%d", &pid)
 		if pid > 0 {
-			attachedPostID = sql.NullInt64{Int64: pid, Valid: true}
+			attached = sql.NullInt64{Int64: pid, Valid: true}
 		}
 	}
 
-	var id int64
-	err = h.db.QueryRow(`
-		INSERT INTO media (uploader_id, filename, storage_path, thumbnail_path, mime_type, byte_size, width, height, attached_post_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id`,
-		u.UserID, header.Filename, storagePath, thumbnailPath, mime, written,
-		nilIfZero(width), nilIfZero(height), attachedPostID,
-	).Scan(&id)
+	id, err := h.q.CreateMedia(r.Context(), dbq.CreateMediaParams{
+		UploaderID:     sql.NullInt64{Int64: u.UserID, Valid: true},
+		Filename:       header.Filename,
+		StoragePath:    storagePath,
+		ThumbnailPath:  thumbnailPath,
+		MimeType:       mime,
+		ByteSize:       sql.NullInt64{Int64: written, Valid: true},
+		Width:          nullInt32(width),
+		Height:         nullInt32(height),
+		AttachedPostID: attached,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
 		return
 	}
 
-	resp := M{
-		"id":   id,
-		"url":  "/uploads/" + storagePath,
-		"path": storagePath,
-	}
+	resp := M{"id": id, "url": "/uploads/" + storagePath, "path": storagePath}
 	if thumbnailPath.Valid {
 		resp["thumbnail_url"] = "/uploads/" + thumbnailPath.String
 	}
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+func (h *MediaHandler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
+	u := UserFromContext(r.Context())
+	if u == nil {
+		writeJSON(w, http.StatusUnauthorized, M{"error": "not logged in"})
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 5<<20)
+	if err := r.ParseMultipartForm(5 << 20); err != nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": "file too large"})
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": "file field required"})
+		return
+	}
+	defer file.Close()
+
+	mime := header.Header.Get("Content-Type")
+	if !strings.HasPrefix(mime, "image/") {
+		writeJSON(w, http.StatusBadRequest, M{"error": "only images allowed"})
+		return
+	}
+	ext := filepath.Ext(header.Filename)
+	if ext == "" {
+		ext = ".jpg"
+	}
+
+	avatarDir := filepath.Join(h.uploadsDir, "avatars")
+	os.MkdirAll(avatarDir, 0o755)
+	filename := fmt.Sprintf("%d%s", u.UserID, ext)
+	absPath := filepath.Join(avatarDir, filename)
+
+	out, err := os.Create(absPath)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "file create error"})
+		return
+	}
+	io.Copy(out, file)
+	out.Close()
+
+	avatarPath := "/uploads/avatars/" + filename
+	if err := h.q.UpdateUserAvatar(r.Context(), dbq.UpdateUserAvatarParams{
+		AvatarPath: sql.NullString{String: avatarPath, Valid: true},
+		ID:         u.UserID,
+	}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
+		return
+	}
+	writeJSON(w, http.StatusOK, M{"avatar_path": avatarPath})
 }
 
 func decodeImage(path string) (image.Image, string, error) {
@@ -255,7 +282,6 @@ func saveThumbnail(img image.Image, path string, maxDim int) error {
 	bounds := img.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
 	if w <= maxDim && h <= maxDim {
-		// Already small enough; still write as JPEG for consistent thumb format
 		return writeJPEG(img, path, 85)
 	}
 	var tw, th int
@@ -280,60 +306,9 @@ func writeJPEG(img image.Image, path string, quality int) error {
 	return jpeg.Encode(out, img, &jpeg.Options{Quality: quality})
 }
 
-func (h *MediaHandler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
-	u := UserFromContext(r.Context())
-	if u == nil {
-		writeJSON(w, http.StatusUnauthorized, M{"error": "not logged in"})
-		return
-	}
-
-	r.Body = http.MaxBytesReader(w, r.Body, 5<<20) // 5MB
-	if err := r.ParseMultipartForm(5 << 20); err != nil {
-		writeJSON(w, http.StatusBadRequest, M{"error": "file too large"})
-		return
-	}
-
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, M{"error": "file field required"})
-		return
-	}
-	defer file.Close()
-
-	mime := header.Header.Get("Content-Type")
-	if !strings.HasPrefix(mime, "image/") {
-		writeJSON(w, http.StatusBadRequest, M{"error": "only images allowed"})
-		return
-	}
-
-	ext := filepath.Ext(header.Filename)
-	if ext == "" {
-		ext = ".jpg"
-	}
-
-	avatarDir := filepath.Join(h.uploadsDir, "avatars")
-	os.MkdirAll(avatarDir, 0o755)
-
-	filename := fmt.Sprintf("%d%s", u.UserID, ext)
-	absPath := filepath.Join(avatarDir, filename)
-
-	out, err := os.Create(absPath)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": "file create error"})
-		return
-	}
-	defer out.Close()
-	io.Copy(out, file)
-
-	avatarPath := "/uploads/avatars/" + filename
-	h.db.Exec(`UPDATE users SET avatar_path = $1 WHERE id = $2`, avatarPath, u.UserID)
-
-	writeJSON(w, http.StatusOK, M{"avatar_path": avatarPath})
-}
-
-func nilIfZero(v int) *int {
+func nullInt32(v int) sql.NullInt32 {
 	if v == 0 {
-		return nil
+		return sql.NullInt32{}
 	}
-	return &v
+	return sql.NullInt32{Int32: int32(v), Valid: true}
 }

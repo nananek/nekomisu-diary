@@ -6,41 +6,35 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/nananek/nekomisu-diary/internal/dbq"
 	"github.com/nananek/nekomisu-diary/internal/ratelimit"
 	"github.com/nananek/nekomisu-diary/internal/session"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthHandler struct {
-	db                 *sql.DB
-	sess               *session.Manager
-	loginRate          *ratelimit.Limiter // nil ok
-	twoFARate          *ratelimit.Limiter // nil ok
-	allowRegistration  bool
+	q                 *dbq.Queries
+	sess              *session.Manager
+	loginRate         *ratelimit.Limiter // nil ok
+	twoFARate         *ratelimit.Limiter // nil ok
+	allowRegistration bool
 }
 
 func NewAuthHandler(db *sql.DB, sess *session.Manager) *AuthHandler {
-	return &AuthHandler{db: db, sess: sess}
+	return &AuthHandler{q: dbq.New(db), sess: sess}
 }
 
-// WithRateLimit enables rate limiting on login / 2FA verify endpoints.
-// loginRate applies to password login; twoFARate to TOTP / WebAuthn
-// verification after login succeeds.
 func (h *AuthHandler) WithRateLimit(loginRate, twoFARate *ratelimit.Limiter) *AuthHandler {
 	h.loginRate = loginRate
 	h.twoFARate = twoFARate
 	return h
 }
 
-// AllowRegistration controls whether POST /api/auth/register is available.
-// Default is false: the endpoint returns 403 unless explicitly enabled.
 func (h *AuthHandler) AllowRegistration(allow bool) *AuthHandler {
 	h.allowRegistration = allow
 	return h
 }
 
-// TwoFARate exposes the 2FA limiter so other handlers (WebAuthn) can
-// share the same bucket.
 func (h *AuthHandler) TwoFARate() *ratelimit.Limiter { return h.twoFARate }
 
 func clientIP(r *http.Request) string {
@@ -68,50 +62,42 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var userID int64
-	var hash string
-	err := h.db.QueryRow(
-		`SELECT id, password_hash FROM users WHERE login = $1`, req.Login,
-	).Scan(&userID, &hash)
+	user, err := h.q.GetUserByLogin(r.Context(), req.Login)
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, M{"error": "invalid credentials"})
 		return
 	}
-	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)) != nil {
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)) != nil {
 		writeJSON(w, http.StatusUnauthorized, M{"error": "invalid credentials"})
 		return
 	}
 
-	// Successful auth: reset counters
-	if h.loginRate != nil {
-		h.loginRate.Reset("ip:" + ip)
-		h.loginRate.Reset("login:" + req.Login)
+	has2fa, err := h.q.UserHas2FA(r.Context(), user.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "internal error"})
+		return
 	}
 
-	// Check if user has 2FA enabled
-	var hasTotp, hasWebauthn bool
-	h.db.QueryRow(`
-		SELECT
-			EXISTS(SELECT 1 FROM totp_secrets WHERE user_id = $1 AND verified = true),
-			EXISTS(SELECT 1 FROM webauthn_credentials WHERE user_id = $1)`,
-		userID).Scan(&hasTotp, &hasWebauthn)
-
-	if hasTotp || hasWebauthn {
-		if err := h.sess.Create(w, userID, false); err != nil {
+	if has2fa.HasTotp || has2fa.HasWebauthn {
+		if err := h.sess.Create(w, user.ID, false); err != nil {
 			writeJSON(w, http.StatusInternalServerError, M{"error": "session error"})
 			return
 		}
 		writeJSON(w, http.StatusOK, M{
 			"requires_2fa": true,
-			"has_totp":     hasTotp,
-			"has_webauthn": hasWebauthn,
+			"has_totp":     has2fa.HasTotp,
+			"has_webauthn": has2fa.HasWebauthn,
 		})
 		return
 	}
 
-	if err := h.sess.Create(w, userID, true); err != nil {
+	if err := h.sess.Create(w, user.ID, true); err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "session error"})
 		return
+	}
+	if h.loginRate != nil {
+		h.loginRate.Reset("ip:" + ip)
+		h.loginRate.Reset("login:" + req.Login)
 	}
 	writeJSON(w, http.StatusOK, M{"ok": true})
 }
@@ -164,13 +150,12 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var userID int64
-	err = h.db.QueryRow(`
-		INSERT INTO users (login, email, display_name, password_hash)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id`,
-		req.Login, req.Email, req.DisplayName, string(hash),
-	).Scan(&userID)
+	userID, err := h.q.CreateUser(r.Context(), dbq.CreateUserParams{
+		Login:        req.Login,
+		Email:        req.Email,
+		DisplayName:  req.DisplayName,
+		PasswordHash: string(hash),
+	})
 	if err != nil {
 		writeJSON(w, http.StatusConflict, M{"error": "login or email already exists"})
 		return
@@ -203,15 +188,24 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var hash string
-	h.db.QueryRow(`SELECT password_hash FROM users WHERE id = $1`, u.UserID).Scan(&hash)
+	hash, err := h.q.GetUserPasswordHash(r.Context(), u.UserID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "internal error"})
+		return
+	}
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.OldPassword)) != nil {
 		writeJSON(w, http.StatusUnauthorized, M{"error": "old password incorrect"})
 		return
 	}
 
 	newHash, _ := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
-	h.db.Exec(`UPDATE users SET password_hash = $1 WHERE id = $2`, string(newHash), u.UserID)
+	if err := h.q.UpdateUserPassword(r.Context(), dbq.UpdateUserPasswordParams{
+		PasswordHash: string(newHash),
+		ID:           u.UserID,
+	}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "internal error"})
+		return
+	}
 	writeJSON(w, http.StatusOK, M{"ok": true})
 }
 
@@ -231,14 +225,20 @@ func (h *AuthHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.DisplayName != nil {
-		h.db.Exec(`UPDATE users SET display_name = $1 WHERE id = $2`, *req.DisplayName, u.UserID)
+		_ = h.q.UpdateUserDisplayName(r.Context(), dbq.UpdateUserDisplayNameParams{
+			DisplayName: *req.DisplayName,
+			ID:          u.UserID,
+		})
 	}
 	if req.Email != nil {
-		_, err := h.db.Exec(`UPDATE users SET email = $1 WHERE id = $2`, *req.Email, u.UserID)
-		if err != nil {
+		if err := h.q.UpdateUserEmail(r.Context(), dbq.UpdateUserEmailParams{
+			Email: *req.Email,
+			ID:    u.UserID,
+		}); err != nil {
 			writeJSON(w, http.StatusConflict, M{"error": "email already in use"})
 			return
 		}
 	}
 	writeJSON(w, http.StatusOK, M{"ok": true})
 }
+

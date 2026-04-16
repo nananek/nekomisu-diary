@@ -3,82 +3,54 @@ package handler
 import (
 	"database/sql"
 	"net/http"
+	"strconv"
+
+	"github.com/nananek/nekomisu-diary/internal/dbq"
 )
 
 type MemberHandler struct {
-	db *sql.DB
+	q *dbq.Queries
 }
 
 func NewMemberHandler(db *sql.DB) *MemberHandler {
-	return &MemberHandler{db: db}
+	return &MemberHandler{q: dbq.New(db)}
+}
+
+func (h *MemberHandler) List(w http.ResponseWriter, r *http.Request) {
+	rows, err := h.q.ListMembers(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
+		return
+	}
+	members := make([]M, 0, len(rows))
+	for _, rr := range rows {
+		members = append(members, M{
+			"id":            rr.ID,
+			"login":         rr.Login,
+			"display_name":  rr.DisplayName,
+			"avatar_path":   nullStr(rr.AvatarPath),
+			"created_at":    rr.CreatedAt,
+			"post_count":    rr.PostCount,
+			"comment_count": rr.CommentCount,
+		})
+	}
+	writeJSON(w, http.StatusOK, M{"members": members})
 }
 
 func (h *MemberHandler) Get(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("userId")
-	var (
-		uid        int64
-		login      string
-		dispName   string
-		createdAt  string
-		avatar     sql.NullString
-		posts      int
-		comments   int
-	)
-	err := h.db.QueryRow(`
-		SELECT u.id, u.login, u.display_name, u.avatar_path, u.created_at,
-		       (SELECT COUNT(*) FROM posts WHERE author_id = u.id AND visibility != 'draft'),
-		       (SELECT COUNT(*) FROM comments WHERE author_id = u.id)
-		FROM users u WHERE u.id = $1`, id,
-	).Scan(&uid, &login, &dispName, &avatar, &createdAt, &posts, &comments)
+	id, _ := strconv.ParseInt(r.PathValue("userId"), 10, 64)
+	rr, err := h.q.GetMember(r.Context(), id)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, M{"error": "not found"})
 		return
 	}
 	writeJSON(w, http.StatusOK, M{
-		"id":            uid,
-		"login":         login,
-		"display_name":  dispName,
-		"avatar_path":   nullStr(avatar),
-		"created_at":    createdAt,
-		"post_count":    posts,
-		"comment_count": comments,
+		"id":            rr.ID,
+		"login":         rr.Login,
+		"display_name":  rr.DisplayName,
+		"avatar_path":   nullStr(rr.AvatarPath),
+		"created_at":    rr.CreatedAt,
+		"post_count":    rr.PostCount,
+		"comment_count": rr.CommentCount,
 	})
-}
-
-func (h *MemberHandler) List(w http.ResponseWriter, r *http.Request) {
-	rows, err := h.db.Query(`
-		SELECT u.id, u.login, u.display_name, u.avatar_path, u.created_at,
-		       (SELECT COUNT(*) FROM posts WHERE author_id = u.id AND visibility != 'draft') AS post_count,
-		       (SELECT COUNT(*) FROM comments WHERE author_id = u.id) AS comment_count
-		FROM users u
-		ORDER BY u.created_at`)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
-		return
-	}
-	defer rows.Close()
-
-	var members []M
-	for rows.Next() {
-		var id int64
-		var login, displayName, createdAt string
-		var avatar sql.NullString
-		var postCount, commentCount int
-		if rows.Scan(&id, &login, &displayName, &avatar, &createdAt, &postCount, &commentCount) != nil {
-			continue
-		}
-		members = append(members, M{
-			"id":            id,
-			"login":         login,
-			"display_name":  displayName,
-			"avatar_path":   nullStr(avatar),
-			"created_at":    createdAt,
-			"post_count":    postCount,
-			"comment_count": commentCount,
-		})
-	}
-	if members == nil {
-		members = []M{}
-	}
-	writeJSON(w, http.StatusOK, M{"members": members})
 }

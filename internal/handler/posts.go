@@ -8,11 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nananek/nekomisu-diary/internal/dbq"
 	"github.com/nananek/nekomisu-diary/internal/sanitize"
 )
 
 type PostHandler struct {
-	db       *sql.DB
+	q        *dbq.Queries
 	notifier PostNotifier
 }
 
@@ -21,26 +22,25 @@ type PostNotifier interface {
 }
 
 func NewPostHandler(db *sql.DB, n PostNotifier) *PostHandler {
-	return &PostHandler{db: db, notifier: n}
+	return &PostHandler{q: dbq.New(db), notifier: n}
 }
 
 type postJSON struct {
-	ID          int64   `json:"id"`
-	AuthorID    int64   `json:"author_id"`
-	AuthorName  string  `json:"author_name"`
+	ID           int64   `json:"id"`
+	AuthorID     int64   `json:"author_id"`
+	AuthorName   string  `json:"author_name"`
 	AuthorAvatar *string `json:"author_avatar"`
-	Title       string  `json:"title"`
-	BodyHTML    string  `json:"body_html"`
-	BodyMD      *string `json:"body_md,omitempty"`
-	Excerpt     string  `json:"excerpt"`
-	Visibility  string  `json:"visibility"`
-	PublishedAt *string `json:"published_at"`
-	CreatedAt   string  `json:"created_at"`
-	CommentCount int    `json:"comment_count"`
+	Title        string  `json:"title"`
+	BodyHTML     string  `json:"body_html"`
+	BodyMD       *string `json:"body_md,omitempty"`
+	Excerpt      string  `json:"excerpt"`
+	Visibility   string  `json:"visibility"`
+	PublishedAt  *string `json:"published_at"`
+	CreatedAt    string  `json:"created_at"`
+	CommentCount int     `json:"comment_count"`
 }
 
 // makeExcerpt strips tags from HTML and truncates to the given rune count.
-// The result is safe to render as text content (no HTML).
 func makeExcerpt(htmlStr string, runes int) string {
 	var b strings.Builder
 	inTag := false
@@ -62,67 +62,72 @@ func makeExcerpt(htmlStr string, runes int) string {
 	return s
 }
 
+// postFromListRow adapts generated list-row types into postJSON for the
+// API response. Each list query shares the same column shape.
+type listRow struct {
+	ID           int64
+	AuthorID     int64
+	AuthorName   string
+	AuthorAvatar sql.NullString
+	Title        string
+	BodyHTML     string
+	Visibility   string
+	PublishedAt  sql.NullTime
+	CreatedAt    time.Time
+	CommentCount int32
+}
+
+func listRowToJSON(r listRow) postJSON {
+	p := postJSON{
+		ID:           r.ID,
+		AuthorID:     r.AuthorID,
+		AuthorName:   r.AuthorName,
+		AuthorAvatar: nullStr(r.AuthorAvatar),
+		Title:        r.Title,
+		Visibility:   r.Visibility,
+		CreatedAt:    r.CreatedAt.Format(time.RFC3339),
+		CommentCount: int(r.CommentCount),
+		Excerpt:      makeExcerpt(r.BodyHTML, 160),
+	}
+	if r.PublishedAt.Valid {
+		s := r.PublishedAt.Time.Format(time.RFC3339)
+		p.PublishedAt = &s
+	}
+	return p
+}
+
 func (h *PostHandler) List(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	if page < 1 {
 		page = 1
 	}
-	limit := 20
+	const limit = 20
 	offset := (page - 1) * limit
 
-	rows, err := h.db.Query(`
-		SELECT p.id, p.author_id, u.display_name, u.avatar_path,
-		       p.title, p.body_html, p.visibility,
-		       p.published_at, p.created_at,
-		       (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)
-		FROM posts p
-		JOIN users u ON u.id = p.author_id
-		WHERE p.visibility = 'public'
-		   OR (p.visibility = 'private' AND p.author_id = $1)
-		ORDER BY p.published_at DESC NULLS LAST
-		LIMIT $2 OFFSET $3`,
-		u.UserID, limit, offset)
+	rows, err := h.q.ListPosts(r.Context(), dbq.ListPostsParams{
+		AuthorID: u.UserID,
+		Limit:    limit,
+		Offset:   int32(offset),
+	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
 		return
 	}
-	defer rows.Close()
+	total, _ := h.q.CountVisiblePosts(r.Context(), u.UserID)
 
-	posts := make([]postJSON, 0)
-	for rows.Next() {
-		var p postJSON
-		var avatar sql.NullString
-		var publishedAt, createdAt time.Time
-		var pubAtNull sql.NullTime
-		if err := rows.Scan(&p.ID, &p.AuthorID, &p.AuthorName, &avatar,
-			&p.Title, &p.BodyHTML, &p.Visibility,
-			&pubAtNull, &createdAt, &p.CommentCount); err != nil {
-			continue
-		}
-		p.AuthorAvatar = nullStr(avatar)
-		p.CreatedAt = createdAt.Format(time.RFC3339)
-		if pubAtNull.Valid {
-			publishedAt = pubAtNull.Time
-			s := publishedAt.Format(time.RFC3339)
-			p.PublishedAt = &s
-		}
-		p.Excerpt = makeExcerpt(p.BodyHTML, 160)
-		p.BodyHTML = ""
-		posts = append(posts, p)
+	posts := make([]postJSON, 0, len(rows))
+	for _, rr := range rows {
+		posts = append(posts, listRowToJSON(listRow{
+			ID: rr.ID, AuthorID: rr.AuthorID, AuthorName: rr.AuthorName,
+			AuthorAvatar: rr.AuthorAvatar, Title: rr.Title, BodyHTML: rr.BodyHtml,
+			Visibility: rr.Visibility, PublishedAt: rr.PublishedAt,
+			CreatedAt: rr.CreatedAt, CommentCount: rr.CommentCount,
+		}))
 	}
-
-	var total int
-	h.db.QueryRow(`
-		SELECT COUNT(*) FROM posts
-		WHERE visibility = 'public'
-		   OR (visibility = 'private' AND author_id = $1)`, u.UserID).Scan(&total)
-
 	writeJSON(w, http.StatusOK, M{
-		"posts": posts,
-		"total": total,
-		"page":  page,
-		"pages": (total + limit - 1) / limit,
+		"posts": posts, "total": total, "page": page,
+		"pages": (int(total) + limit - 1) / limit,
 	})
 }
 
@@ -130,35 +135,31 @@ func (h *PostHandler) Get(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 
-	var p postJSON
-	var avatar sql.NullString
-	var pubAtNull sql.NullTime
-	var createdAt time.Time
-	var bodyMD sql.NullString
-	err := h.db.QueryRow(`
-		SELECT p.id, p.author_id, u.display_name, u.avatar_path,
-		       p.title, p.body_html, p.body_md, p.visibility,
-		       p.published_at, p.created_at,
-		       (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)
-		FROM posts p
-		JOIN users u ON u.id = p.author_id
-		WHERE p.id = $1
-		  AND (p.visibility = 'public' OR (p.visibility = 'private' AND p.author_id = $2))`,
-		id, u.UserID).Scan(&p.ID, &p.AuthorID, &p.AuthorName, &avatar,
-		&p.Title, &p.BodyHTML, &bodyMD, &p.Visibility,
-		&pubAtNull, &createdAt, &p.CommentCount)
+	row, err := h.q.GetPost(r.Context(), dbq.GetPostParams{
+		ID:       id,
+		AuthorID: u.UserID,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, M{"error": "not found"})
 		return
 	}
-	p.AuthorAvatar = nullStr(avatar)
-	p.CreatedAt = createdAt.Format(time.RFC3339)
-	if pubAtNull.Valid {
-		s := pubAtNull.Time.Format(time.RFC3339)
-		p.PublishedAt = &s
+	p := postJSON{
+		ID:           row.ID,
+		AuthorID:     row.AuthorID,
+		AuthorName:   row.AuthorName,
+		AuthorAvatar: nullStr(row.AuthorAvatar),
+		Title:        row.Title,
+		BodyHTML:     row.BodyHtml,
+		Visibility:   row.Visibility,
+		CreatedAt:    row.CreatedAt.Format(time.RFC3339),
+		CommentCount: int(row.CommentCount),
 	}
-	if bodyMD.Valid {
-		p.BodyMD = &bodyMD.String
+	if row.BodyMd.Valid {
+		p.BodyMD = &row.BodyMd.String
+	}
+	if row.PublishedAt.Valid {
+		s := row.PublishedAt.Time.Format(time.RFC3339)
+		p.PublishedAt = &s
 	}
 	writeJSON(w, http.StatusOK, p)
 }
@@ -183,25 +184,27 @@ func (h *PostHandler) Create(w http.ResponseWriter, r *http.Request) {
 		req.Visibility = "public"
 	}
 
-	now := time.Now()
-	var publishedAt *time.Time
+	var publishedAt sql.NullTime
 	if req.Visibility != "draft" {
-		publishedAt = &now
+		publishedAt = sql.NullTime{Time: time.Now(), Valid: true}
+	}
+	var bodyMD sql.NullString
+	if req.BodyMD != nil {
+		bodyMD = sql.NullString{String: *req.BodyMD, Valid: true}
 	}
 
-	safeBody := sanitize.HTML(req.Body)
-	var id int64
-	err := h.db.QueryRow(`
-		INSERT INTO posts (author_id, title, body_html, body_md, visibility, published_at)
-		VALUES ($1, $2, $3, $4, $5::post_visibility, $6)
-		RETURNING id`,
-		u.UserID, req.Title, safeBody, req.BodyMD, req.Visibility, publishedAt,
-	).Scan(&id)
+	id, err := h.q.CreatePost(r.Context(), dbq.CreatePostParams{
+		AuthorID:    u.UserID,
+		Title:       req.Title,
+		BodyHtml:    sanitize.HTML(req.Body),
+		BodyMd:      bodyMD,
+		Visibility:  req.Visibility,
+		PublishedAt: publishedAt,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
 		return
 	}
-	// Notify Discord only for public publishes (not private, not draft)
 	if h.notifier != nil && req.Visibility == "public" {
 		h.notifier.NotifyPost(id, req.Title)
 	}
@@ -212,10 +215,8 @@ func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 
-	var authorID int64
-	var prevVisibility, prevTitle string
-	err := h.db.QueryRow(`SELECT author_id, visibility, title FROM posts WHERE id = $1`, id).Scan(&authorID, &prevVisibility, &prevTitle)
-	if err != nil || authorID != u.UserID {
+	info, err := h.q.GetPostForAuthorization(r.Context(), id)
+	if err != nil || info.AuthorID != u.UserID {
 		writeJSON(w, http.StatusForbidden, M{"error": "forbidden"})
 		return
 	}
@@ -231,28 +232,30 @@ func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context()
 	if req.Title != nil {
-		h.db.Exec(`UPDATE posts SET title = $1 WHERE id = $2`, *req.Title, id)
+		_ = h.q.UpdatePostTitle(ctx, dbq.UpdatePostTitleParams{Title: *req.Title, ID: id})
 	}
 	if req.Body != nil {
-		h.db.Exec(`UPDATE posts SET body_html = $1 WHERE id = $2`, sanitize.HTML(*req.Body), id)
+		_ = h.q.UpdatePostBody(ctx, dbq.UpdatePostBodyParams{BodyHtml: sanitize.HTML(*req.Body), ID: id})
 	}
 	if req.BodyMD != nil {
-		h.db.Exec(`UPDATE posts SET body_md = $1 WHERE id = $2`, *req.BodyMD, id)
+		_ = h.q.UpdatePostBodyMD(ctx, dbq.UpdatePostBodyMDParams{
+			BodyMd: sql.NullString{String: *req.BodyMD, Valid: true},
+			ID:     id,
+		})
 	}
 	newlyPublic := false
 	if req.Visibility != nil {
-		h.db.Exec(`UPDATE posts SET visibility = $1::post_visibility WHERE id = $2`, *req.Visibility, id)
-		if *req.Visibility != "draft" {
-			h.db.Exec(`UPDATE posts SET published_at = COALESCE(published_at, NOW()) WHERE id = $1`, id)
-		}
-		if *req.Visibility == "public" && prevVisibility != "public" {
+		_ = h.q.UpdatePostVisibility(ctx, dbq.UpdatePostVisibilityParams{
+			Visibility: *req.Visibility, ID: id,
+		})
+		if *req.Visibility == "public" && info.Visibility != "public" {
 			newlyPublic = true
 		}
 	}
-	// Notify on first publish (draft/private → public)
 	if newlyPublic && h.notifier != nil {
-		title := prevTitle
+		title := info.Title
 		if req.Title != nil {
 			title = *req.Title
 		}
@@ -265,12 +268,11 @@ func (h *PostHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 
-	res, err := h.db.Exec(`DELETE FROM posts WHERE id = $1 AND author_id = $2`, id, u.UserID)
+	n, err := h.q.DeletePost(r.Context(), dbq.DeletePostParams{ID: id, AuthorID: u.UserID})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
 		return
 	}
-	n, _ := res.RowsAffected()
 	if n == 0 {
 		writeJSON(w, http.StatusForbidden, M{"error": "forbidden or not found"})
 		return
@@ -280,21 +282,21 @@ func (h *PostHandler) Delete(w http.ResponseWriter, r *http.Request) {
 
 func (h *PostHandler) Drafts(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
-	rows, err := h.db.Query(`
-		SELECT p.id, p.author_id, u.display_name, u.avatar_path,
-		       p.title, p.body_html, p.visibility,
-		       p.published_at, p.created_at,
-		       (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)
-		FROM posts p
-		JOIN users u ON u.id = p.author_id
-		WHERE p.visibility = 'draft' AND p.author_id = $1
-		ORDER BY p.created_at DESC`, u.UserID)
+	rows, err := h.q.ListDrafts(r.Context(), u.UserID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
 		return
 	}
-	defer rows.Close()
-	writeJSON(w, http.StatusOK, M{"posts": scanPosts(rows)})
+	posts := make([]postJSON, 0, len(rows))
+	for _, rr := range rows {
+		posts = append(posts, listRowToJSON(listRow{
+			ID: rr.ID, AuthorID: rr.AuthorID, AuthorName: rr.AuthorName,
+			AuthorAvatar: rr.AuthorAvatar, Title: rr.Title, BodyHTML: rr.BodyHtml,
+			Visibility: rr.Visibility, PublishedAt: rr.PublishedAt,
+			CreatedAt: rr.CreatedAt, CommentCount: rr.CommentCount,
+		}))
+	}
+	writeJSON(w, http.StatusOK, M{"posts": posts})
 }
 
 func (h *PostHandler) Search(w http.ResponseWriter, r *http.Request) {
@@ -304,24 +306,23 @@ func (h *PostHandler) Search(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, M{"error": "q parameter required"})
 		return
 	}
-	like := "%" + q + "%"
-	rows, err := h.db.Query(`
-		SELECT p.id, p.author_id, u.display_name, u.avatar_path,
-		       p.title, p.body_html, p.visibility,
-		       p.published_at, p.created_at,
-		       (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)
-		FROM posts p
-		JOIN users u ON u.id = p.author_id
-		WHERE (p.visibility = 'public' OR (p.visibility = 'private' AND p.author_id = $1))
-		  AND (p.title ILIKE $2 OR p.body_html ILIKE $2)
-		ORDER BY p.published_at DESC NULLS LAST
-		LIMIT 50`, u.UserID, like)
+	rows, err := h.q.SearchPosts(r.Context(), dbq.SearchPostsParams{
+		AuthorID: u.UserID,
+		Title:    "%" + q + "%",
+	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
 		return
 	}
-	defer rows.Close()
-	posts := scanPosts(rows)
+	posts := make([]postJSON, 0, len(rows))
+	for _, rr := range rows {
+		posts = append(posts, listRowToJSON(listRow{
+			ID: rr.ID, AuthorID: rr.AuthorID, AuthorName: rr.AuthorName,
+			AuthorAvatar: rr.AuthorAvatar, Title: rr.Title, BodyHTML: rr.BodyHtml,
+			Visibility: rr.Visibility, PublishedAt: rr.PublishedAt,
+			CreatedAt: rr.CreatedAt, CommentCount: rr.CommentCount,
+		}))
+	}
 	writeJSON(w, http.StatusOK, M{"posts": posts, "total": len(posts)})
 }
 
@@ -332,54 +333,35 @@ func (h *PostHandler) ByAuthor(w http.ResponseWriter, r *http.Request) {
 	if page < 1 {
 		page = 1
 	}
-	limit := 20
+	const limit = 20
 	offset := (page - 1) * limit
-	rows, err := h.db.Query(`
-		SELECT p.id, p.author_id, u.display_name, u.avatar_path,
-		       p.title, p.body_html, p.visibility,
-		       p.published_at, p.created_at,
-		       (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)
-		FROM posts p
-		JOIN users u ON u.id = p.author_id
-		WHERE p.author_id = $1
-		  AND (p.visibility = 'public' OR (p.visibility = 'private' AND p.author_id = $2))
-		ORDER BY p.published_at DESC NULLS LAST
-		LIMIT $3 OFFSET $4`, authorID, u.UserID, limit, offset)
+
+	rows, err := h.q.ListPostsByAuthor(r.Context(), dbq.ListPostsByAuthorParams{
+		AuthorID:   authorID,
+		AuthorID_2: u.UserID,
+		Limit:      limit,
+		Offset:     int32(offset),
+	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
 		return
 	}
-	defer rows.Close()
-	posts := scanPosts(rows)
-	var total int
-	h.db.QueryRow(`SELECT COUNT(*) FROM posts WHERE author_id = $1
-		AND (visibility = 'public' OR (visibility = 'private' AND author_id = $2))`,
-		authorID, u.UserID).Scan(&total)
-	writeJSON(w, http.StatusOK, M{"posts": posts, "total": total, "page": page, "pages": (total + limit - 1) / limit})
-}
+	total, _ := h.q.CountPostsByAuthor(r.Context(), dbq.CountPostsByAuthorParams{
+		AuthorID:   authorID,
+		AuthorID_2: u.UserID,
+	})
 
-func scanPosts(rows *sql.Rows) []postJSON {
-	posts := make([]postJSON, 0)
-	for rows.Next() {
-		var p postJSON
-		var avatar sql.NullString
-		var pubAtNull sql.NullTime
-		var createdAt time.Time
-		if err := rows.Scan(&p.ID, &p.AuthorID, &p.AuthorName, &avatar,
-			&p.Title, &p.BodyHTML, &p.Visibility,
-			&pubAtNull, &createdAt, &p.CommentCount); err != nil {
-			continue
-		}
-		p.AuthorAvatar = nullStr(avatar)
-		p.CreatedAt = createdAt.Format(time.RFC3339)
-		if pubAtNull.Valid {
-			s := pubAtNull.Time.Format(time.RFC3339)
-			p.PublishedAt = &s
-		}
-		p.Excerpt = makeExcerpt(p.BodyHTML, 160)
-		// Timeline lists don't need the full body payload — keep it small.
-		p.BodyHTML = ""
-		posts = append(posts, p)
+	posts := make([]postJSON, 0, len(rows))
+	for _, rr := range rows {
+		posts = append(posts, listRowToJSON(listRow{
+			ID: rr.ID, AuthorID: rr.AuthorID, AuthorName: rr.AuthorName,
+			AuthorAvatar: rr.AuthorAvatar, Title: rr.Title, BodyHTML: rr.BodyHtml,
+			Visibility: rr.Visibility, PublishedAt: rr.PublishedAt,
+			CreatedAt: rr.CreatedAt, CommentCount: rr.CommentCount,
+		}))
 	}
-	return posts
+	writeJSON(w, http.StatusOK, M{
+		"posts": posts, "total": total, "page": page,
+		"pages": (int(total) + limit - 1) / limit,
+	})
 }
