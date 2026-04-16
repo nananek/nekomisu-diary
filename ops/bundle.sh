@@ -87,14 +87,14 @@ else
 fi
 
 echo "==> rewriting compose.prod.yml for bundle layout"
-# Swap schema+seed initdb mounts for the full pg_dump (postgres initdb
+# Swap the schema.sql initdb mount for the full pg_dump (postgres initdb
 # auto-loads .sql.gz). tailscale_state is already relative (./).
 python3 - "$STAGE/compose.prod.yml" <<'PY'
 import sys, re
 p = sys.argv[1]
 t = open(p).read()
 t = re.sub(
-    r"\s*- \./schema\.sql:/docker-entrypoint-initdb\.d/01-schema\.sql:ro\n\s*- \./tools/seed-data\.sql:/docker-entrypoint-initdb\.d/02-seed-data\.sql:ro",
+    r"\s*- \./schema\.sql:/docker-entrypoint-initdb\.d/01-schema\.sql:ro",
     "\n      - ./data/diary.sql.gz:/docker-entrypoint-initdb.d/01-diary.sql.gz:ro",
     t,
 )

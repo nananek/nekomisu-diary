@@ -51,12 +51,16 @@ npm run dev
 ## 本番デプロイ
 
 Tailscale で公開する前提の `compose.prod.yml` を同梱。Tailscale Serve で
-自動 HTTPS。詳細は `DEPLOY.md`（バンドル時に自動生成）を参照。
+自動 HTTPS、サーバー本体は GHCR (`ghcr.io/nananek/nekomisu-diary-server`)
+から pull します。詳細は `DEPLOY.md`（バンドル時に自動生成）を参照。
 
 ```sh
 cp .env.example .env  # 値を埋める
+mkdir -p tailscale_state uploads   # 初回のみ
 docker compose -f compose.prod.yml up -d
 ```
+
+特定のバージョンに固定したい場合は `.env` 等で `SERVER_IMAGE=ghcr.io/nananek/nekomisu-diary-server:sha-abc1234` を指定。
 
 ## テスト
 

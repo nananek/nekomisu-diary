@@ -1,6 +1,11 @@
 # Production compose for Exchange Diary.
 # All services share Tailscale's network namespace and communicate on 127.0.0.1.
 # The tailscale_state volume persists the node identity across restarts.
+#
+# Server image is pulled from GHCR; no local Go toolchain required.
+# To pin a specific version, replace :latest with :v1.2.3 or :sha-abc1234.
+# Bundled deploys (ops/bundle.sh) also use this file; bundle.sh rewrites
+# the postgres initdb mount to load the full pg_dump instead of just schema.sql.
 
 name: diary-prod
 
@@ -33,16 +38,15 @@ services:
     volumes:
       - pg-data:/var/lib/postgresql/data
       - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ./tools/seed-data.sql:/docker-entrypoint-initdb.d/02-seed-data.sql:ro
     network_mode: "service:tailscale"
 
   server:
-    image: alpine:latest
+    image: ${SERVER_IMAGE:-ghcr.io/nananek/nekomisu-diary-server:latest}
+    pull_policy: always
     restart: unless-stopped
     depends_on:
       - postgres
       - tailscale
-    entrypoint: ["/app/bin/server"]
     command:
       - -pg=postgres://diary:${PG_PASSWORD}@127.0.0.1:5432/diary?sslmode=disable
       - -addr=:3000
@@ -52,9 +56,6 @@ services:
       - -rp-origin=${RP_ORIGIN}
       - -discord-webhook=${DISCORD_WEBHOOK:-}
     volumes:
-      - ./bin/server:/app/bin/server:ro
-      - ./bin/passwdreset:/app/bin/passwdreset:ro
-      - ./web/dist:/app/web/dist:ro
       - ./uploads:/app/uploads
     network_mode: "service:tailscale"
 
