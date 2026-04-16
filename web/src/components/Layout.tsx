@@ -69,6 +69,10 @@ export default function Layout() {
         </nav>
       </header>
 
+      <main className="main-content">
+        <Outlet />
+      </main>
+
       {/* Mobile bottom nav */}
       <nav className="bottom-nav">
         <Link to="/" className={isActive('/')}><Icon name="home" size={22} /><span>ホーム</span></Link>
@@ -77,10 +81,6 @@ export default function Layout() {
         <Link to="/members" className={isActive('/members')}><Icon name="users" size={22} /><span>メンバー</span></Link>
         <Link to="/settings" className={isActive('/settings')}><Icon name="settings" size={22} /><span>設定</span></Link>
       </nav>
-
-      <main className="main-content">
-        <Outlet />
-      </main>
     </div>
   )
 }

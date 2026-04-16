@@ -52,3 +52,8 @@ logs/
 *.db
 tools/rendered.json
 tools/seed-data.sql
+
+# Playwright
+web/test-results/
+web/playwright-report/
+web/playwright/.cache/
