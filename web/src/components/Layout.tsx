@@ -43,35 +43,35 @@ export default function Layout() {
           </button>
         </div>
         <nav className={`topnav ${menuOpen ? 'open' : ''}`}>
-          <Link to="/" className={`nav-item ${isActive('/')}`} onClick={close}>
-            <Icon name="home" size={18} />タイムライン
+          <Link to="/" className={`nav-item ${isActive('/')}`} onClick={close} title="タイムライン">
+            <Icon name="home" size={18} /><span className="nav-label">タイムライン</span>
             {unreadCount > 0 && <span className="badge">{unreadCount}</span>}
           </Link>
-          <Link to="/new" className={`nav-item ${isActive('/new')}`} onClick={close}>
-            <Icon name="plus" size={18} />新しい日記
+          <Link to="/new" className={`nav-item ${isActive('/new')}`} onClick={close} title="新しい日記">
+            <Icon name="plus" size={18} /><span className="nav-label">新しい日記</span>
           </Link>
-          <Link to="/search" className={`nav-item ${isActive('/search')}`} onClick={close}>
-            <Icon name="search" size={18} />検索
+          <Link to="/search" className={`nav-item ${isActive('/search')}`} onClick={close} title="検索">
+            <Icon name="search" size={18} /><span className="nav-label">検索</span>
           </Link>
-          <Link to="/members" className={`nav-item ${isActive('/members')}`} onClick={close}>
-            <Icon name="users" size={18} />メンバー
+          <Link to="/members" className={`nav-item ${isActive('/members')}`} onClick={close} title="メンバー">
+            <Icon name="users" size={18} /><span className="nav-label">メンバー</span>
           </Link>
-          <Link to="/drafts" className={`nav-item ${isActive('/drafts')}`} onClick={close}>
-            <Icon name="draft" size={18} />下書き
+          <Link to="/drafts" className={`nav-item ${isActive('/drafts')}`} onClick={close} title="下書き">
+            <Icon name="draft" size={18} /><span className="nav-label">下書き</span>
           </Link>
-          <Link to="/media" className={`nav-item ${isActive('/media')}`} onClick={close}>
-            <Icon name="image" size={18} />メディア
+          <Link to="/media" className={`nav-item ${isActive('/media')}`} onClick={close} title="メディア">
+            <Icon name="image" size={18} /><span className="nav-label">メディア</span>
           </Link>
-          <Link to="/settings" className={`nav-item ${isActive('/settings')}`} onClick={close}>
-            <Icon name="settings" size={18} />{user?.display_name}
+          <Link to="/settings" className={`nav-item ${isActive('/settings')}`} onClick={close} title={`設定 (${user?.display_name})`}>
+            <Icon name="settings" size={18} /><span className="nav-label">{user?.display_name}</span>
           </Link>
           {canInstall && (
-            <button className="nav-item" onClick={() => { install(); close() }}>
-              <Icon name="download" size={18} />アプリを追加
+            <button className="nav-item" onClick={() => { install(); close() }} title="アプリを追加">
+              <Icon name="download" size={18} /><span className="nav-label">アプリを追加</span>
             </button>
           )}
-          <button className="nav-item nav-logout" onClick={logout}>
-            <Icon name="logout" size={18} />ログアウト
+          <button className="nav-item nav-logout" onClick={logout} title="ログアウト">
+            <Icon name="logout" size={18} /><span className="nav-label">ログアウト</span>
           </button>
         </nav>
       </header>

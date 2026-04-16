@@ -92,6 +92,27 @@ test.describe('Mobile layout', () => {
 
 test.describe('Desktop layout', () => {
   test.skip(({ viewport }) => (viewport?.width ?? 0) < 900, 'desktop only')
+
+  test('topbar renders on a single row with reasonable height', async ({ page }) => {
+    await login(page)
+    const topbar = page.locator('.topbar')
+    const box = await topbar.boundingBox()
+    // A healthy topbar is ~50px tall. A broken one (previous bug:
+    // site-title wrapping one Japanese char per line) would be 300px+.
+    expect(box!.height).toBeLessThan(120)
+
+    // site-title should not be vertically-wrapped (was 10×318 in the bug)
+    const titleBox = await page.locator('.site-title').boundingBox()
+    expect(titleBox!.width).toBeGreaterThan(80)
+    expect(titleBox!.height).toBeLessThan(50)
+
+    // Every topnav child sits on the same horizontal row
+    const ys = await page.locator('.topnav > *').evaluateAll(els =>
+      els.map(e => Math.round(e.getBoundingClientRect().y))
+    )
+    expect(new Set(ys).size).toBe(1)
+  })
+
   test('bottom nav hidden, topnav visible', async ({ page }) => {
     await login(page)
     await expect(page.locator('.bottom-nav')).toBeHidden()
