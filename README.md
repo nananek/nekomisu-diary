@@ -62,6 +62,39 @@ docker compose -f compose.prod.yml up -d
 
 特定のバージョンに固定したい場合は `.env` 等で `SERVER_IMAGE=ghcr.io/nananek/nekomisu-diary-server:sha-abc1234` を指定。
 
+## パスワードリセット
+
+メール基盤は持っていないので、リセットは管理者 (サーバーに入れる人) が CLI で行います。
+`passwdreset` バイナリはサーバーイメージに同梱されています。
+
+### 本番 (compose.prod.yml で動かしている場合)
+
+```sh
+docker compose -f compose.prod.yml exec server \
+  /app/bin/passwdreset \
+  -pg "postgres://diary:${PG_PASSWORD}@127.0.0.1:5432/diary?sslmode=disable" \
+  -user <login> \
+  -password <新しいパスワード>
+```
+
+`${PG_PASSWORD}` は `.env` と同じ値（shell で展開されない場合は直接書く）。
+
+### ローカル開発
+
+```sh
+go run ./cmd/passwdreset \
+  -pg "postgres://localhost/diary?sslmode=disable" \
+  -user <login> \
+  -password <新しいパスワード>
+```
+
+### 挙動
+
+- 指定した login が存在しない場合はエラー終了（既存ハッシュは変更されない）
+- 2FA (TOTP / WebAuthn) の設定はリセットされない — ユーザーが 2FA を紛失した場合は
+  `DELETE FROM totp_secrets WHERE user_id = ...` / `DELETE FROM webauthn_credentials WHERE user_id = ...`
+  を psql で直接実行してください
+
 ## テスト
 
 ```sh
