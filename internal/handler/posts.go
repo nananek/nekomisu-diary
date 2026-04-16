@@ -215,3 +215,106 @@ func (h *PostHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, M{"ok": true})
 }
+
+func (h *PostHandler) Drafts(w http.ResponseWriter, r *http.Request) {
+	u := UserFromContext(r.Context())
+	rows, err := h.db.Query(`
+		SELECT p.id, p.author_id, u.display_name, u.avatar_path,
+		       p.title, p.body_html, p.visibility,
+		       p.published_at, p.created_at,
+		       (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)
+		FROM posts p
+		JOIN users u ON u.id = p.author_id
+		WHERE p.visibility = 'draft' AND p.author_id = $1
+		ORDER BY p.created_at DESC`, u.UserID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
+		return
+	}
+	defer rows.Close()
+	writeJSON(w, http.StatusOK, M{"posts": scanPosts(rows)})
+}
+
+func (h *PostHandler) Search(w http.ResponseWriter, r *http.Request) {
+	u := UserFromContext(r.Context())
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		writeJSON(w, http.StatusBadRequest, M{"error": "q parameter required"})
+		return
+	}
+	like := "%" + q + "%"
+	rows, err := h.db.Query(`
+		SELECT p.id, p.author_id, u.display_name, u.avatar_path,
+		       p.title, p.body_html, p.visibility,
+		       p.published_at, p.created_at,
+		       (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)
+		FROM posts p
+		JOIN users u ON u.id = p.author_id
+		WHERE (p.visibility = 'public' OR (p.visibility = 'private' AND p.author_id = $1))
+		  AND (p.title ILIKE $2 OR p.body_html ILIKE $2)
+		ORDER BY p.published_at DESC NULLS LAST
+		LIMIT 50`, u.UserID, like)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
+		return
+	}
+	defer rows.Close()
+	posts := scanPosts(rows)
+	writeJSON(w, http.StatusOK, M{"posts": posts, "total": len(posts)})
+}
+
+func (h *PostHandler) ByAuthor(w http.ResponseWriter, r *http.Request) {
+	u := UserFromContext(r.Context())
+	authorID, _ := strconv.ParseInt(r.PathValue("userId"), 10, 64)
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	limit := 20
+	offset := (page - 1) * limit
+	rows, err := h.db.Query(`
+		SELECT p.id, p.author_id, u.display_name, u.avatar_path,
+		       p.title, p.body_html, p.visibility,
+		       p.published_at, p.created_at,
+		       (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id)
+		FROM posts p
+		JOIN users u ON u.id = p.author_id
+		WHERE p.author_id = $1
+		  AND (p.visibility = 'public' OR (p.visibility = 'private' AND p.author_id = $2))
+		ORDER BY p.published_at DESC NULLS LAST
+		LIMIT $3 OFFSET $4`, authorID, u.UserID, limit, offset)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
+		return
+	}
+	defer rows.Close()
+	posts := scanPosts(rows)
+	var total int
+	h.db.QueryRow(`SELECT COUNT(*) FROM posts WHERE author_id = $1
+		AND (visibility = 'public' OR (visibility = 'private' AND author_id = $2))`,
+		authorID, u.UserID).Scan(&total)
+	writeJSON(w, http.StatusOK, M{"posts": posts, "total": total, "page": page, "pages": (total + limit - 1) / limit})
+}
+
+func scanPosts(rows *sql.Rows) []postJSON {
+	posts := make([]postJSON, 0)
+	for rows.Next() {
+		var p postJSON
+		var avatar sql.NullString
+		var pubAtNull sql.NullTime
+		var createdAt time.Time
+		if err := rows.Scan(&p.ID, &p.AuthorID, &p.AuthorName, &avatar,
+			&p.Title, &p.BodyHTML, &p.Visibility,
+			&pubAtNull, &createdAt, &p.CommentCount); err != nil {
+			continue
+		}
+		p.AuthorAvatar = nullStr(avatar)
+		p.CreatedAt = createdAt.Format(time.RFC3339)
+		if pubAtNull.Valid {
+			s := pubAtNull.Time.Format(time.RFC3339)
+			p.PublishedAt = &s
+		}
+		posts = append(posts, p)
+	}
+	return posts
+}

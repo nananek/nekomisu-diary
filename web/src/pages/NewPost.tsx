@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import ImageUploader from '../components/ImageUploader'
+import { renderMarkdown } from '../lib/markdown'
 import './NewPost.css'
 
 export default function NewPost() {
@@ -10,13 +11,15 @@ export default function NewPost() {
   const [body, setBody] = useState('')
   const [visibility, setVisibility] = useState('public')
   const [submitting, setSubmitting] = useState(false)
+  const [preview, setPreview] = useState(false)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!title.trim() || !body.trim()) return
     setSubmitting(true)
     try {
-      const { id } = await api.createPost(title, body, visibility)
+      const html = renderMarkdown(body)
+      const { id } = await api.createPost(title, html, visibility)
       nav(`/posts/${id}`)
     } finally {
       setSubmitting(false)
@@ -34,14 +37,22 @@ export default function NewPost() {
           required
           autoFocus
         />
-        <textarea
-          placeholder="Write your diary entry..."
-          value={body}
-          onChange={e => setBody(e.target.value)}
-          rows={10}
-          required
-        />
-        <ImageUploader onInsert={(url) => setBody(b => b + `\n<img src="${url}" />`)} />
+        <div className="editor-tabs">
+          <button type="button" className={!preview ? 'active' : ''} onClick={() => setPreview(false)}>Write</button>
+          <button type="button" className={preview ? 'active' : ''} onClick={() => setPreview(true)}>Preview</button>
+        </div>
+        {preview ? (
+          <div className="post-body preview-box" dangerouslySetInnerHTML={{ __html: renderMarkdown(body) }} />
+        ) : (
+          <textarea
+            placeholder="Write in Markdown..."
+            value={body}
+            onChange={e => setBody(e.target.value)}
+            rows={10}
+            required
+          />
+        )}
+        <ImageUploader onInsert={(url) => setBody(b => b + `\n![image](${url})`)} />
         <div className="form-footer">
           <select value={visibility} onChange={e => setVisibility(e.target.value)}>
             <option value="public">Public</option>

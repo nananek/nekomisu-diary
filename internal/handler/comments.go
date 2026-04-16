@@ -102,3 +102,24 @@ func (h *CommentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, M{"id": id})
 }
+
+func (h *CommentHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	u := UserFromContext(r.Context())
+	if u == nil {
+		writeJSON(w, http.StatusUnauthorized, M{"error": "not logged in"})
+		return
+	}
+	commentID, _ := strconv.ParseInt(r.PathValue("commentId"), 10, 64)
+
+	res, err := h.db.Exec(`DELETE FROM comments WHERE id = $1 AND author_id = $2`, commentID, u.UserID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		writeJSON(w, http.StatusForbidden, M{"error": "forbidden or not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, M{"ok": true})
+}

@@ -45,6 +45,16 @@ export interface WebAuthnCredential {
   created_at: string
 }
 
+export interface Member {
+  id: number
+  login: string
+  display_name: string
+  avatar_path: string | null
+  created_at: string
+  post_count: number
+  comment_count: number
+}
+
 async function request<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     credentials: 'same-origin',
@@ -136,6 +146,13 @@ export const api = {
   updatePost: (id: number, data: { title?: string; body?: string; visibility?: string }) =>
     request(`/api/posts/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deletePost: (id: number) => request(`/api/posts/${id}`, { method: 'DELETE' }),
+  drafts: () => request<{ posts: Post[] }>('/api/posts/drafts'),
+  search: (q: string) => request<{ posts: Post[]; total: number }>(`/api/posts/search?q=${encodeURIComponent(q)}`),
+  userPosts: (userId: number, page = 1) =>
+    request<{ posts: Post[]; total: number; page: number; pages: number }>(`/api/users/${userId}/posts?page=${page}`),
+
+  // Members
+  members: () => request<{ members: Member[] }>('/api/members'),
 
   // Comments
   comments: (postId: number) =>
@@ -145,6 +162,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ body, parent_id: parentId }),
     }),
+  deleteComment: (commentId: number) =>
+    request(`/api/comments/${commentId}`, { method: 'DELETE' }),
 
   // Media
   uploadMedia: (file: File, postId?: number) =>

@@ -47,6 +47,8 @@ func main() {
 		log.Fatalf("webauthn: %v", err)
 	}
 
+	members := handler.NewMemberHandler(pool)
+
 	var mediaH *handler.MediaHandler
 	if *uploadsDir != "" {
 		mediaH = handler.NewMediaHandler(pool, *uploadsDir)
@@ -87,9 +89,18 @@ func main() {
 	mux.Handle("PUT /api/posts/{id}", requireAuth(http.HandlerFunc(posts.Update)))
 	mux.Handle("DELETE /api/posts/{id}", requireAuth(http.HandlerFunc(posts.Delete)))
 
+	// Posts: drafts, search, by-author
+	mux.Handle("GET /api/posts/drafts", requireAuth(http.HandlerFunc(posts.Drafts)))
+	mux.Handle("GET /api/posts/search", requireAuth(http.HandlerFunc(posts.Search)))
+	mux.Handle("GET /api/users/{userId}/posts", requireAuth(http.HandlerFunc(posts.ByAuthor)))
+
+	// Members
+	mux.Handle("GET /api/members", requireAuth(http.HandlerFunc(members.List)))
+
 	// Comments (session required)
 	mux.Handle("GET /api/posts/{id}/comments", requireAuth(http.HandlerFunc(comments.List)))
 	mux.Handle("POST /api/posts/{id}/comments", requireAuth(http.HandlerFunc(comments.Create)))
+	mux.Handle("DELETE /api/comments/{commentId}", requireAuth(http.HandlerFunc(comments.Delete)))
 
 	// Media
 	if mediaH != nil {

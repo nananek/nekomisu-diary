@@ -8,6 +8,10 @@ import PostView from './pages/PostView'
 import NewPost from './pages/NewPost'
 import Settings from './pages/Settings'
 import EditPost from './pages/EditPost'
+import Drafts from './pages/Drafts'
+import Search from './pages/Search'
+import Members from './pages/Members'
+import MemberPosts from './pages/MemberPosts'
 import Layout from './components/Layout'
 
 interface AuthCtx {
@@ -45,6 +49,10 @@ function App() {
           <Route path="/posts/:id" element={<PostView />} />
           <Route path="/posts/:id/edit" element={<EditPost />} />
           <Route path="/new" element={<NewPost />} />
+          <Route path="/drafts" element={<Drafts />} />
+          <Route path="/search" element={<Search />} />
+          <Route path="/members" element={<Members />} />
+          <Route path="/members/:userId" element={<MemberPosts />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
       </Routes>

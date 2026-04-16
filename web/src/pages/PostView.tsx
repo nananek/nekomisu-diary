@@ -31,6 +31,12 @@ export default function PostView() {
     setComments(d.comments)
   }
 
+  const deleteComment = async (commentId: number) => {
+    await api.deleteComment(commentId)
+    const d = await api.comments(postId)
+    setComments(d.comments)
+  }
+
   const deletePost = async () => {
     if (!confirm('Delete this post?')) return
     await api.deletePost(postId)
@@ -71,7 +77,7 @@ export default function PostView() {
         <h3>Comments ({comments.length})</h3>
         {topLevel.map(c => (
           <div key={c.id} className="comment-thread">
-            <CommentItem c={c} onReply={setReplyTo} activeReply={replyTo} />
+            <CommentItem c={c} onReply={setReplyTo} onDelete={deleteComment} activeReply={replyTo} currentUserId={user?.id ?? 0} />
             {replies(c.id).map(r => (
               <div key={r.id} className="comment-reply">
                 <CommentItem c={r} onReply={setReplyTo} activeReply={replyTo} />
@@ -102,11 +108,15 @@ export default function PostView() {
 function CommentItem({
   c,
   onReply,
+  onDelete,
   activeReply,
+  currentUserId,
 }: {
   c: Comment
   onReply: (id: number) => void
+  onDelete: (id: number) => void
   activeReply: number | null
+  currentUserId: number
 }) {
   return (
     <div className={`comment card ${activeReply === c.id ? 'replying' : ''}`}>
@@ -119,7 +129,12 @@ function CommentItem({
           <span className="author-name">{c.author_name}</span>
           <span className="meta">{new Date(c.created_at).toLocaleDateString('ja-JP')}</span>
         </div>
-        <button className="reply-btn" onClick={() => onReply(c.id)}>Reply</button>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button className="reply-btn" onClick={() => onReply(c.id)}>Reply</button>
+          {c.author_id === currentUserId && (
+            <button className="reply-btn danger" onClick={() => onDelete(c.id)}>Del</button>
+          )}
+        </div>
       </div>
       <p>{c.body}</p>
     </div>
