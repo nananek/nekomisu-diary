@@ -50,6 +50,7 @@ services:
       - -web=/app/web/dist
       - -rp-id=${RP_ID}
       - -rp-origin=${RP_ORIGIN}
+      - -discord-webhook=${DISCORD_WEBHOOK:-}
     volumes:
       - ./bin/server:/app/bin/server:ro
       - ./web/dist:/app/web/dist:ro

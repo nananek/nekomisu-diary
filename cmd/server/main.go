@@ -10,6 +10,7 @@ import (
 
 	"github.com/nananek/nekomisu-diary/internal/db"
 	"github.com/nananek/nekomisu-diary/internal/handler"
+	"github.com/nananek/nekomisu-diary/internal/notifier"
 	"github.com/nananek/nekomisu-diary/internal/session"
 )
 
@@ -20,6 +21,7 @@ func main() {
 	webDir := flag.String("web", "", "Path to frontend dist directory")
 	rpID := flag.String("rp-id", "localhost", "WebAuthn Relying Party ID (domain)")
 	rpOrigin := flag.String("rp-origin", "http://localhost:3000", "WebAuthn Relying Party origin")
+	discordWebhook := flag.String("discord-webhook", "", "Discord webhook URL for post/comment notifications")
 	flag.Parse()
 
 	pool, err := db.Open(*pgDSN)
@@ -37,9 +39,14 @@ func main() {
 		}
 	}()
 
+	disc := notifier.NewDiscord(*discordWebhook, *rpOrigin)
+	if disc != nil {
+		log.Printf("Discord notifier enabled")
+	}
+
 	auth := handler.NewAuthHandler(pool, sess)
-	posts := handler.NewPostHandler(pool)
-	comments := handler.NewCommentHandler(pool)
+	posts := handler.NewPostHandler(pool, disc)
+	comments := handler.NewCommentHandler(pool, disc)
 	totpH := handler.NewTOTPHandler(pool, sess)
 
 	waH, err := handler.NewWebAuthnHandler(pool, sess, *rpID, *rpOrigin)

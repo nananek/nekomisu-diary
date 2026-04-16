@@ -9,11 +9,16 @@ import (
 )
 
 type PostHandler struct {
-	db *sql.DB
+	db       *sql.DB
+	notifier PostNotifier
 }
 
-func NewPostHandler(db *sql.DB) *PostHandler {
-	return &PostHandler{db: db}
+type PostNotifier interface {
+	NotifyPost(postID int64, title string)
+}
+
+func NewPostHandler(db *sql.DB, n PostNotifier) *PostHandler {
+	return &PostHandler{db: db, notifier: n}
 }
 
 type postJSON struct {
@@ -160,6 +165,10 @@ func (h *PostHandler) Create(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
 		return
 	}
+	// Notify Discord only for public publishes (not private, not draft)
+	if h.notifier != nil && req.Visibility == "public" {
+		h.notifier.NotifyPost(id, req.Title)
+	}
 	writeJSON(w, http.StatusCreated, M{"id": id})
 }
 
@@ -168,7 +177,8 @@ func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 
 	var authorID int64
-	err := h.db.QueryRow(`SELECT author_id FROM posts WHERE id = $1`, id).Scan(&authorID)
+	var prevVisibility, prevTitle string
+	err := h.db.QueryRow(`SELECT author_id, visibility, title FROM posts WHERE id = $1`, id).Scan(&authorID, &prevVisibility, &prevTitle)
 	if err != nil || authorID != u.UserID {
 		writeJSON(w, http.StatusForbidden, M{"error": "forbidden"})
 		return
@@ -190,11 +200,23 @@ func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.Body != nil {
 		h.db.Exec(`UPDATE posts SET body_html = $1 WHERE id = $2`, *req.Body, id)
 	}
+	newlyPublic := false
 	if req.Visibility != nil {
 		h.db.Exec(`UPDATE posts SET visibility = $1::post_visibility WHERE id = $2`, *req.Visibility, id)
 		if *req.Visibility != "draft" {
 			h.db.Exec(`UPDATE posts SET published_at = COALESCE(published_at, NOW()) WHERE id = $1`, id)
 		}
+		if *req.Visibility == "public" && prevVisibility != "public" {
+			newlyPublic = true
+		}
+	}
+	// Notify on first publish (draft/private → public)
+	if newlyPublic && h.notifier != nil {
+		title := prevTitle
+		if req.Title != nil {
+			title = *req.Title
+		}
+		h.notifier.NotifyPost(id, title)
 	}
 	writeJSON(w, http.StatusOK, M{"ok": true})
 }

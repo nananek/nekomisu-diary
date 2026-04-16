@@ -9,11 +9,16 @@ import (
 )
 
 type CommentHandler struct {
-	db *sql.DB
+	db       *sql.DB
+	notifier CommentNotifier
 }
 
-func NewCommentHandler(db *sql.DB) *CommentHandler {
-	return &CommentHandler{db: db}
+type CommentNotifier interface {
+	NotifyComment(postID, commentID int64, postTitle, author, body string)
+}
+
+func NewCommentHandler(db *sql.DB, n CommentNotifier) *CommentHandler {
+	return &CommentHandler{db: db, notifier: n}
 }
 
 type commentJSON struct {
@@ -73,9 +78,9 @@ func (h *CommentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
 	postID, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 
-	var exists bool
-	h.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM posts WHERE id = $1)`, postID).Scan(&exists)
-	if !exists {
+	var postTitle string
+	err := h.db.QueryRow(`SELECT title FROM posts WHERE id = $1`, postID).Scan(&postTitle)
+	if err != nil {
 		writeJSON(w, http.StatusNotFound, M{"error": "post not found"})
 		return
 	}
@@ -90,7 +95,7 @@ func (h *CommentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var id int64
-	err := h.db.QueryRow(`
+	err = h.db.QueryRow(`
 		INSERT INTO comments (post_id, author_id, body, parent_id)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id`,
@@ -99,6 +104,9 @@ func (h *CommentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
 		return
+	}
+	if h.notifier != nil {
+		h.notifier.NotifyComment(postID, id, postTitle, u.DisplayName, req.Body)
 	}
 	writeJSON(w, http.StatusCreated, M{"id": id})
 }
