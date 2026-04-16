@@ -182,13 +182,23 @@ func (h *MediaHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Close()
 
-	// Try to get image dimensions and generate a thumbnail (best-effort)
+	// Decode, strip metadata (EXIF etc.) by re-encoding, and generate thumbnail.
 	var width, height int
 	var thumbnailPath sql.NullString
 	if img, format, err := decodeImage(absPath); err == nil {
 		bounds := img.Bounds()
 		width = bounds.Dx()
 		height = bounds.Dy()
+		if format == "jpeg" {
+			// Re-encode over the original file to strip EXIF / thumbnails / GPS.
+			if err := writeJPEG(img, absPath, 95); err == nil {
+				if st, err := os.Stat(absPath); err == nil {
+					written = st.Size()
+				}
+			}
+		}
+		// PNG doesn't typically carry EXIF; keep original. (tEXt chunks are
+		// usually harmless, and re-encoding would re-compress and change CRCs.)
 		if format == "jpeg" || format == "png" {
 			thumbRel := strings.TrimSuffix(storagePath, filepath.Ext(storagePath)) + "-thumb.jpg"
 			thumbAbs := filepath.Join(h.uploadsDir, thumbRel)

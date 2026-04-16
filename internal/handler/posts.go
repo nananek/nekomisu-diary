@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/nananek/nekomisu-diary/internal/sanitize"
 )
 
 type PostHandler struct {
@@ -160,12 +162,13 @@ func (h *PostHandler) Create(w http.ResponseWriter, r *http.Request) {
 		publishedAt = &now
 	}
 
+	safeBody := sanitize.HTML(req.Body)
 	var id int64
 	err := h.db.QueryRow(`
 		INSERT INTO posts (author_id, title, body_html, body_md, visibility, published_at)
 		VALUES ($1, $2, $3, $4, $5::post_visibility, $6)
 		RETURNING id`,
-		u.UserID, req.Title, req.Body, req.BodyMD, req.Visibility, publishedAt,
+		u.UserID, req.Title, safeBody, req.BodyMD, req.Visibility, publishedAt,
 	).Scan(&id)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
@@ -205,7 +208,7 @@ func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.db.Exec(`UPDATE posts SET title = $1 WHERE id = $2`, *req.Title, id)
 	}
 	if req.Body != nil {
-		h.db.Exec(`UPDATE posts SET body_html = $1 WHERE id = $2`, *req.Body, id)
+		h.db.Exec(`UPDATE posts SET body_html = $1 WHERE id = $2`, sanitize.HTML(*req.Body), id)
 	}
 	if req.BodyMD != nil {
 		h.db.Exec(`UPDATE posts SET body_md = $1 WHERE id = $2`, *req.BodyMD, id)
