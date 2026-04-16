@@ -95,3 +95,25 @@ textarea { resize: vertical; min-height: 120px; }
 }
 
 .meta { font-size: 14px; color: var(--text); }
+
+/* Mobile touch targets */
+@media (max-width: 640px) {
+  .card { padding: 16px; }
+  button, .btn { padding: 10px 16px; min-height: 44px; }
+  input, textarea, select { padding: 10px 12px; min-height: 44px; font-size: 16px; }
+  h1 { font-size: 22px; }
+  h2 { font-size: 20px; }
+  h3 { font-size: 17px; }
+
+  /* Prevent zoom on iOS input focus */
+  input[type="text"], input[type="password"], input[type="email"], textarea, select {
+    font-size: 16px;
+  }
+}
+
+/* Standalone PWA: extra top padding for status bar */
+@media (display-mode: standalone) {
+  .topbar {
+    padding-top: env(safe-area-inset-top, 12px);
+  }
+}
