@@ -67,25 +67,49 @@ docker compose -f compose.prod.yml up -d
 メール基盤は持っていないので、リセットは管理者 (サーバーに入れる人) が CLI で行います。
 `passwdreset` バイナリはサーバーイメージに同梱されています。
 
+### 3つのモード
+
+| 用途 | コマンド |
+|---|---|
+| 1人・パスワード指定 | `-user <login> -password <pw>` |
+| 1人・ランダム生成 (stdout に出力) | `-user <login> -random` |
+| 全員・ランダム生成 (確認プロンプト) | `-all -random` |
+
+ランダムパスワードは 16文字、紛らわしい文字 (0/O/1/l/I) を除外した英数字。
+
 ### 本番 (compose.prod.yml で動かしている場合)
 
 ```sh
+# 1人、パスワード指定
 docker compose -f compose.prod.yml exec server \
   /app/bin/passwdreset \
   -pg "postgres://diary:${PG_PASSWORD}@127.0.0.1:5432/diary?sslmode=disable" \
-  -user <login> \
-  -password <新しいパスワード>
+  -user <login> -password <新しいパスワード>
+
+# 1人、ランダム (標準出力に表示された文字列を渡す)
+docker compose -f compose.prod.yml exec server \
+  /app/bin/passwdreset -pg "..." -user <login> -random
+
+# 全員リセット (対話的確認あり、login<TAB>password で出力)
+docker compose -f compose.prod.yml exec -T server \
+  /app/bin/passwdreset -pg "..." -all -random > new-passwords.tsv
+# ※ compose exec に -T (no TTY) + 対話入力できない環境では -yes が必要
 ```
 
-`${PG_PASSWORD}` は `.env` と同じ値（shell で展開されない場合は直接書く）。
+`-all -random` 実行時の確認プロンプト例:
+
+```
+⚠  This will reset passwords for all 3 users to fresh random values.
+   Existing passwords will be lost; you must hand the new ones to each user.
+   2FA (TOTP / WebAuthn) is NOT affected.
+
+Type 'yes' to proceed:
+```
 
 ### ローカル開発
 
 ```sh
-go run ./cmd/passwdreset \
-  -pg "postgres://localhost/diary?sslmode=disable" \
-  -user <login> \
-  -password <新しいパスワード>
+go run ./cmd/passwdreset -pg "postgres://localhost/diary?sslmode=disable" -user <login> -random
 ```
 
 ### 挙動
@@ -94,6 +118,7 @@ go run ./cmd/passwdreset \
 - 2FA (TOTP / WebAuthn) の設定はリセットされない — ユーザーが 2FA を紛失した場合は
   `DELETE FROM totp_secrets WHERE user_id = ...` / `DELETE FROM webauthn_credentials WHERE user_id = ...`
   を psql で直接実行してください
+- `-all` で出力されたパスワード一覧は安全な方法 (Discord DM、暗号化ファイル転送 等) で配布してください。シェル履歴・ログに残さないこと。
 
 ## テスト
 
