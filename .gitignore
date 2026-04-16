@@ -50,3 +50,4 @@ logs/
 *.sqlite
 *.sqlite3
 *.db
+tools/rendered.json

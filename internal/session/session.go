@@ -11,6 +11,7 @@ import (
 const (
 	CookieName = "session"
 	TTL        = 30 * 24 * time.Hour
+	PendingTTL = 5 * time.Minute
 )
 
 type Manager struct {
@@ -27,17 +28,23 @@ type UserInfo struct {
 	DisplayName string
 	AvatarPath  sql.NullString
 	Has2FA      bool
+	HasTOTP     bool
+	HasWebAuthn bool
 }
 
-func (m *Manager) Create(w http.ResponseWriter, userID int64) error {
+func (m *Manager) Create(w http.ResponseWriter, userID int64, verified bool) error {
 	id, err := generateID()
 	if err != nil {
 		return err
 	}
-	expires := time.Now().Add(TTL)
+	ttl := TTL
+	if !verified {
+		ttl = PendingTTL
+	}
+	expires := time.Now().Add(ttl)
 	_, err = m.db.Exec(
-		`INSERT INTO sessions (id, user_id, expires_at) VALUES ($1, $2, $3)`,
-		id, userID, expires,
+		`INSERT INTO sessions (id, user_id, verified, expires_at) VALUES ($1, $2, $3, $4)`,
+		id, userID, verified, expires,
 	)
 	if err != nil {
 		return err
@@ -53,7 +60,29 @@ func (m *Manager) Create(w http.ResponseWriter, userID int64) error {
 	return nil
 }
 
+func (m *Manager) Verify(r *http.Request) error {
+	c, err := r.Cookie(CookieName)
+	if err != nil {
+		return err
+	}
+	_, err = m.db.Exec(
+		`UPDATE sessions SET verified = true, expires_at = $1 WHERE id = $2`,
+		time.Now().Add(TTL), c.Value,
+	)
+	return err
+}
+
+// Get returns user info only for fully verified sessions.
 func (m *Manager) Get(r *http.Request) (*UserInfo, error) {
+	return m.get(r, true)
+}
+
+// GetPending returns user info for unverified (2FA pending) sessions.
+func (m *Manager) GetPending(r *http.Request) (*UserInfo, error) {
+	return m.get(r, false)
+}
+
+func (m *Manager) get(r *http.Request, verified bool) (*UserInfo, error) {
 	c, err := r.Cookie(CookieName)
 	if err != nil {
 		return nil, err
@@ -61,16 +90,17 @@ func (m *Manager) Get(r *http.Request) (*UserInfo, error) {
 	var info UserInfo
 	err = m.db.QueryRow(`
 		SELECT s.user_id, u.login, u.display_name, u.avatar_path,
-		       EXISTS(SELECT 1 FROM totp_secrets WHERE user_id = u.id AND verified = true)
-		         OR EXISTS(SELECT 1 FROM webauthn_credentials WHERE user_id = u.id) AS has_2fa
+		       EXISTS(SELECT 1 FROM totp_secrets WHERE user_id = u.id AND verified = true) AS has_totp,
+		       EXISTS(SELECT 1 FROM webauthn_credentials WHERE user_id = u.id) AS has_webauthn
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
-		WHERE s.id = $1 AND s.expires_at > NOW()`,
-		c.Value,
-	).Scan(&info.UserID, &info.Login, &info.DisplayName, &info.AvatarPath, &info.Has2FA)
+		WHERE s.id = $1 AND s.expires_at > NOW() AND s.verified = $2`,
+		c.Value, verified,
+	).Scan(&info.UserID, &info.Login, &info.DisplayName, &info.AvatarPath, &info.HasTOTP, &info.HasWebAuthn)
 	if err != nil {
 		return nil, err
 	}
+	info.Has2FA = info.HasTOTP || info.HasWebAuthn
 	return &info, nil
 }
 

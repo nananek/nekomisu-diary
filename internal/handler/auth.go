@@ -42,7 +42,28 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.sess.Create(w, userID); err != nil {
+	// Check if user has 2FA enabled
+	var hasTotp, hasWebauthn bool
+	h.db.QueryRow(`
+		SELECT
+			EXISTS(SELECT 1 FROM totp_secrets WHERE user_id = $1 AND verified = true),
+			EXISTS(SELECT 1 FROM webauthn_credentials WHERE user_id = $1)`,
+		userID).Scan(&hasTotp, &hasWebauthn)
+
+	if hasTotp || hasWebauthn {
+		if err := h.sess.Create(w, userID, false); err != nil {
+			writeJSON(w, http.StatusInternalServerError, M{"error": "session error"})
+			return
+		}
+		writeJSON(w, http.StatusOK, M{
+			"requires_2fa": true,
+			"has_totp":     hasTotp,
+			"has_webauthn": hasWebauthn,
+		})
+		return
+	}
+
+	if err := h.sess.Create(w, userID, true); err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "session error"})
 		return
 	}
@@ -66,6 +87,8 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 		"display_name": u.DisplayName,
 		"avatar_path":  nullStr(u.AvatarPath),
 		"has_2fa":      u.Has2FA,
+		"has_totp":     u.HasTOTP,
+		"has_webauthn": u.HasWebAuthn,
 	})
 }
 
@@ -103,7 +126,7 @@ func (h *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.sess.Create(w, userID); err != nil {
+	if err := h.sess.Create(w, userID, true); err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "session error"})
 		return
 	}
@@ -139,5 +162,33 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	newHash, _ := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	h.db.Exec(`UPDATE users SET password_hash = $1 WHERE id = $2`, string(newHash), u.UserID)
+	writeJSON(w, http.StatusOK, M{"ok": true})
+}
+
+func (h *AuthHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	u := UserFromContext(r.Context())
+	if u == nil {
+		writeJSON(w, http.StatusUnauthorized, M{"error": "not logged in"})
+		return
+	}
+
+	var req struct {
+		DisplayName *string `json:"display_name"`
+		Email       *string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": "invalid request"})
+		return
+	}
+	if req.DisplayName != nil {
+		h.db.Exec(`UPDATE users SET display_name = $1 WHERE id = $2`, *req.DisplayName, u.UserID)
+	}
+	if req.Email != nil {
+		_, err := h.db.Exec(`UPDATE users SET email = $1 WHERE id = $2`, *req.Email, u.UserID)
+		if err != nil {
+			writeJSON(w, http.StatusConflict, M{"error": "email already in use"})
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, M{"ok": true})
 }

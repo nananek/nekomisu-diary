@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { api } from '../api'
 import type { Post, Comment } from '../api'
 import { useAuth } from '../App'
@@ -57,7 +57,10 @@ export default function PostView() {
             </span>
           </div>
           {user?.id === post.author_id && (
-            <button className="danger" onClick={deletePost}>Delete</button>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Link to={`/posts/${post.id}/edit`} className="btn">Edit</Link>
+              <button className="danger" onClick={deletePost}>Delete</button>
+            </div>
           )}
         </div>
         <h1>{post.title}</h1>

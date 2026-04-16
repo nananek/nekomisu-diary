@@ -2,12 +2,24 @@
 .settings h2 { margin-bottom: 4px; }
 .settings-section h3 { margin-bottom: 8px; font-size: 17px; }
 
-.pass-form {
+.settings-form {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-width: 320px;
+  max-width: 360px;
 }
+.settings-form label { font-size: 14px; font-weight: 500; color: var(--text-h); }
 
 .success { color: green; font-size: 14px; }
 .error { color: var(--danger); font-size: 14px; }
+
+.cred-list { list-style: none; margin-bottom: 12px; }
+.cred-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.cred-list li:last-child { border-bottom: none; }
+.cred-list .danger { font-size: 13px; padding: 2px 8px; }

@@ -16,8 +16,10 @@ import (
 func main() {
 	pgDSN := flag.String("pg", "postgres://diary:diary_dev_pw@postgres:5432/diary?sslmode=disable", "PostgreSQL DSN")
 	addr := flag.String("addr", ":3000", "Listen address")
-	uploadsDir := flag.String("uploads", "", "Path to wp-content/uploads (for serving media)")
+	uploadsDir := flag.String("uploads", "", "Path to uploads directory (for serving and storing media)")
 	webDir := flag.String("web", "", "Path to frontend dist directory")
+	rpID := flag.String("rp-id", "localhost", "WebAuthn Relying Party ID (domain)")
+	rpOrigin := flag.String("rp-origin", "http://localhost:3000", "WebAuthn Relying Party origin")
 	flag.Parse()
 
 	pool, err := db.Open(*pgDSN)
@@ -38,6 +40,17 @@ func main() {
 	auth := handler.NewAuthHandler(pool, sess)
 	posts := handler.NewPostHandler(pool)
 	comments := handler.NewCommentHandler(pool)
+	totpH := handler.NewTOTPHandler(pool, sess)
+
+	waH, err := handler.NewWebAuthnHandler(pool, sess, *rpID, *rpOrigin)
+	if err != nil {
+		log.Fatalf("webauthn: %v", err)
+	}
+
+	var mediaH *handler.MediaHandler
+	if *uploadsDir != "" {
+		mediaH = handler.NewMediaHandler(pool, *uploadsDir)
+	}
 
 	mux := http.NewServeMux()
 
@@ -45,21 +58,44 @@ func main() {
 	mux.HandleFunc("POST /api/auth/login", auth.Login)
 	mux.HandleFunc("POST /api/auth/register", auth.Register)
 
+	// 2FA login verification (pending session)
+	mux.HandleFunc("POST /api/auth/totp/verify-login", totpH.Verify2FA)
+	mux.HandleFunc("POST /api/auth/webauthn/login/begin", waH.LoginBegin)
+	mux.HandleFunc("POST /api/auth/webauthn/login/finish", waH.LoginFinish)
+
 	// Auth (session required)
-	mux.Handle("POST /api/auth/logout", handler.RequireAuth(http.HandlerFunc(auth.Logout)))
+	mux.Handle("POST /api/auth/logout", requireAuth(http.HandlerFunc(auth.Logout)))
 	mux.Handle("GET /api/auth/me", injectUser(sess, http.HandlerFunc(auth.Me)))
-	mux.Handle("PUT /api/auth/password", handler.RequireAuth(http.HandlerFunc(auth.ChangePassword)))
+	mux.Handle("PUT /api/auth/password", requireAuth(http.HandlerFunc(auth.ChangePassword)))
+	mux.Handle("PUT /api/auth/profile", requireAuth(http.HandlerFunc(auth.UpdateProfile)))
+
+	// TOTP management (session required)
+	mux.Handle("POST /api/auth/totp/setup", requireAuth(http.HandlerFunc(totpH.Setup)))
+	mux.Handle("POST /api/auth/totp/confirm", requireAuth(http.HandlerFunc(totpH.Confirm)))
+	mux.Handle("DELETE /api/auth/totp", requireAuth(http.HandlerFunc(totpH.Disable)))
+
+	// WebAuthn management (session required)
+	mux.Handle("POST /api/auth/webauthn/register/begin", requireAuth(http.HandlerFunc(waH.RegisterBegin)))
+	mux.Handle("POST /api/auth/webauthn/register/finish", requireAuth(http.HandlerFunc(waH.RegisterFinish)))
+	mux.Handle("GET /api/auth/webauthn/credentials", requireAuth(http.HandlerFunc(waH.ListCredentials)))
+	mux.Handle("DELETE /api/auth/webauthn/credentials/{credId}", requireAuth(http.HandlerFunc(waH.DeleteCredential)))
 
 	// Posts (session required)
-	mux.Handle("GET /api/posts", handler.RequireAuth(http.HandlerFunc(posts.List)))
-	mux.Handle("GET /api/posts/{id}", handler.RequireAuth(http.HandlerFunc(posts.Get)))
-	mux.Handle("POST /api/posts", handler.RequireAuth(http.HandlerFunc(posts.Create)))
-	mux.Handle("PUT /api/posts/{id}", handler.RequireAuth(http.HandlerFunc(posts.Update)))
-	mux.Handle("DELETE /api/posts/{id}", handler.RequireAuth(http.HandlerFunc(posts.Delete)))
+	mux.Handle("GET /api/posts", requireAuth(http.HandlerFunc(posts.List)))
+	mux.Handle("GET /api/posts/{id}", requireAuth(http.HandlerFunc(posts.Get)))
+	mux.Handle("POST /api/posts", requireAuth(http.HandlerFunc(posts.Create)))
+	mux.Handle("PUT /api/posts/{id}", requireAuth(http.HandlerFunc(posts.Update)))
+	mux.Handle("DELETE /api/posts/{id}", requireAuth(http.HandlerFunc(posts.Delete)))
 
 	// Comments (session required)
-	mux.Handle("GET /api/posts/{id}/comments", handler.RequireAuth(http.HandlerFunc(comments.List)))
-	mux.Handle("POST /api/posts/{id}/comments", handler.RequireAuth(http.HandlerFunc(comments.Create)))
+	mux.Handle("GET /api/posts/{id}/comments", requireAuth(http.HandlerFunc(comments.List)))
+	mux.Handle("POST /api/posts/{id}/comments", requireAuth(http.HandlerFunc(comments.Create)))
+
+	// Media
+	if mediaH != nil {
+		mux.Handle("POST /api/media/upload", requireAuth(http.HandlerFunc(mediaH.Upload)))
+		mux.Handle("POST /api/auth/avatar", requireAuth(http.HandlerFunc(mediaH.UploadAvatar)))
+	}
 
 	// Static: uploaded media
 	if *uploadsDir != "" {
@@ -80,6 +116,10 @@ func main() {
 	if err := http.ListenAndServe(*addr, loggedMux); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func requireAuth(next http.Handler) http.Handler {
+	return handler.RequireAuth(next)
 }
 
 func injectUser(sess *session.Manager, next http.Handler) http.Handler {

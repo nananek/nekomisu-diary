@@ -7,6 +7,7 @@ import Timeline from './pages/Timeline'
 import PostView from './pages/PostView'
 import NewPost from './pages/NewPost'
 import Settings from './pages/Settings'
+import EditPost from './pages/EditPost'
 import Layout from './components/Layout'
 
 interface AuthCtx {
@@ -42,6 +43,7 @@ function App() {
         <Route element={user ? <Layout /> : <Navigate to="/login" />}>
           <Route path="/" element={<Timeline />} />
           <Route path="/posts/:id" element={<PostView />} />
+          <Route path="/posts/:id/edit" element={<EditPost />} />
           <Route path="/new" element={<NewPost />} />
           <Route path="/settings" element={<Settings />} />
         </Route>

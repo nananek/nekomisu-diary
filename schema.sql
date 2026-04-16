@@ -78,6 +78,7 @@ CREATE INDEX media_post_idx ON media (attached_post_id) WHERE attached_post_id I
 CREATE TABLE sessions (
   id          TEXT        PRIMARY KEY,
   user_id     BIGINT      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  verified    BOOLEAN     NOT NULL DEFAULT true,
   expires_at  TIMESTAMPTZ NOT NULL,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
