@@ -51,3 +51,4 @@ logs/
 *.sqlite3
 *.db
 tools/rendered.json
+tools/seed-data.sql
