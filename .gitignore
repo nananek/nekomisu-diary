@@ -57,3 +57,7 @@ tools/seed-data.sql
 web/test-results/
 web/playwright-report/
 web/playwright/.cache/
+
+# Deploy bundles (contain secrets + full data)
+diary-deploy-*.tar.gz
+.bundle-work/
