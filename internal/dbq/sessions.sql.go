@@ -51,8 +51,22 @@ func (q *Queries) DeleteSession(ctx context.Context, id string) error {
 	return err
 }
 
+const extendSessionExpiry = `-- name: ExtendSessionExpiry :exec
+UPDATE sessions SET expires_at = $1 WHERE id = $2
+`
+
+type ExtendSessionExpiryParams struct {
+	ExpiresAt time.Time
+	ID        string
+}
+
+func (q *Queries) ExtendSessionExpiry(ctx context.Context, arg ExtendSessionExpiryParams) error {
+	_, err := q.db.ExecContext(ctx, extendSessionExpiry, arg.ExpiresAt, arg.ID)
+	return err
+}
+
 const getSession = `-- name: GetSession :one
-SELECT s.user_id, u.login, u.display_name, u.avatar_path,
+SELECT s.user_id, s.expires_at, u.login, u.display_name, u.avatar_path,
        EXISTS(SELECT 1 FROM totp_secrets WHERE user_id = u.id AND verified = true) AS has_totp,
        EXISTS(SELECT 1 FROM webauthn_credentials WHERE user_id = u.id) AS has_webauthn
 FROM sessions s
@@ -67,6 +81,7 @@ type GetSessionParams struct {
 
 type GetSessionRow struct {
 	UserID      int64
+	ExpiresAt   time.Time
 	Login       string
 	DisplayName string
 	AvatarPath  sql.NullString
@@ -79,6 +94,7 @@ func (q *Queries) GetSession(ctx context.Context, arg GetSessionParams) (GetSess
 	var i GetSessionRow
 	err := row.Scan(
 		&i.UserID,
+		&i.ExpiresAt,
 		&i.Login,
 		&i.DisplayName,
 		&i.AvatarPath,

@@ -22,3 +22,28 @@
 .error { color: var(--danger); font-size: 14px; }
 
 .switch-mode { margin-top: 16px; font-size: 14px; }
+
+.login-separator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+  color: var(--text);
+  font-size: 12px;
+}
+.login-separator::before,
+.login-separator::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.passkey-btn {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 500;
+}
+.passkey-btn:hover {
+  background: var(--accent-light);
+}

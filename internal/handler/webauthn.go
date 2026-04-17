@@ -2,8 +2,10 @@ package handler
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/base64"
+	"encoding/binary"
 	"log"
 	"net/http"
 	"sync"
@@ -15,6 +17,17 @@ import (
 	"github.com/nananek/nekomisu-diary/internal/ratelimit"
 	"github.com/nananek/nekomisu-diary/internal/session"
 )
+
+// wa_disc cookie ties together DiscoverableLoginBegin and DiscoverableLoginFinish
+// since there's no authenticated session during passkey-only login.
+const waDiscCookie = "wa_disc"
+const waDiscCookieTTL = 5 * time.Minute
+
+func randomKey() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
 
 // Credential IDs are arbitrary bytes; stored base64url-encoded in TEXT.
 func encodeCredID(id []byte) string { return base64.RawURLEncoding.EncodeToString(id) }
@@ -63,10 +76,15 @@ type waUser struct {
 
 func (u *waUser) WebAuthnID() []byte {
 	b := make([]byte, 8)
-	for i := 0; i < 8; i++ {
-		b[i] = byte(u.id >> (i * 8))
-	}
+	binary.LittleEndian.PutUint64(b, uint64(u.id))
 	return b
+}
+
+func decodeUserHandle(b []byte) (int64, bool) {
+	if len(b) != 8 {
+		return 0, false
+	}
+	return int64(binary.LittleEndian.Uint64(b)), true
 }
 func (u *waUser) WebAuthnName() string                       { return u.name }
 func (u *waUser) WebAuthnDisplayName() string                { return u.displayName }
@@ -307,4 +325,107 @@ func (h *WebAuthnHandler) LoginFinish(w http.ResponseWriter, r *http.Request) {
 		h.rate.Reset("2fa-ip:" + clientIP(r))
 	}
 	writeJSON(w, http.StatusOK, M{"ok": true})
+}
+
+// --- Passkey-only (Discoverable Credential) sign-in ---
+//
+// No user identifier submitted up-front: the browser picks a discoverable
+// credential (platform authenticator, Bitwarden, etc.) and sends its
+// userHandle in the assertion. We decode the user from that and create a
+// verified session directly — passkeys are a strong credential on their
+// own, so no password step is involved.
+
+func (h *WebAuthnHandler) DiscoverableLoginBegin(w http.ResponseWriter, r *http.Request) {
+	options, sd, err := h.wa.BeginDiscoverableLogin()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": err.Error()})
+		return
+	}
+	key := randomKey()
+	waSessionPut("disc:"+key, sd)
+	http.SetCookie(w, &http.Cookie{
+		Name:     waDiscCookie,
+		Value:    key,
+		Path:     "/",
+		MaxAge:   int(waDiscCookieTTL.Seconds()),
+		HttpOnly: true,
+		Secure:   h.cookieSecure(),
+		SameSite: http.SameSiteLaxMode,
+	})
+	writeJSON(w, http.StatusOK, options)
+}
+
+func (h *WebAuthnHandler) DiscoverableLoginFinish(w http.ResponseWriter, r *http.Request) {
+	if h.rate != nil {
+		if !h.rate.Allow("disc-ip:" + clientIP(r)) {
+			writeJSON(w, http.StatusTooManyRequests, M{"error": "too many attempts, try again later"})
+			return
+		}
+	}
+
+	c, err := r.Cookie(waDiscCookie)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": "no pending passkey login"})
+		return
+	}
+	sd, ok := waSessionTake("disc:" + c.Value)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, M{"error": "expired passkey login"})
+		return
+	}
+
+	var matchedUser *waUser
+	handler := func(rawID, userHandle []byte) (webauthn.User, error) {
+		uid, ok := decodeUserHandle(userHandle)
+		if !ok {
+			return nil, webauthnError("invalid user handle")
+		}
+		u, err := h.loadUser(r.Context(), uid)
+		if err != nil {
+			return nil, err
+		}
+		matchedUser = u
+		return u, nil
+	}
+
+	cred, err := h.wa.FinishDiscoverableLogin(handler, *sd, r)
+	if err != nil || matchedUser == nil {
+		msg := "authentication failed"
+		if err != nil {
+			msg = err.Error()
+		}
+		writeJSON(w, http.StatusUnauthorized, M{"error": msg})
+		return
+	}
+
+	// Clear the handshake cookie immediately — single-use.
+	http.SetCookie(w, &http.Cookie{
+		Name: waDiscCookie, Value: "", Path: "/", MaxAge: -1,
+		HttpOnly: true, Secure: h.cookieSecure(), SameSite: http.SameSiteLaxMode,
+	})
+
+	logIfErr("webauthn.DiscoverableLoginFinish.sign_count", h.q.UpdateWebAuthnSignCount(r.Context(), dbq.UpdateWebAuthnSignCountParams{
+		SignCount: int64(cred.Authenticator.SignCount),
+		ID:        encodeCredID(cred.ID),
+	}))
+
+	// Passkey login creates a verified session directly (not 2FA-pending).
+	if err := h.sess.Create(w, matchedUser.id, true); err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "session error"})
+		return
+	}
+	if h.rate != nil {
+		h.rate.Reset("disc-ip:" + clientIP(r))
+	}
+	writeJSON(w, http.StatusOK, M{"ok": true})
+}
+
+type webauthnError string
+
+func (e webauthnError) Error() string { return string(e) }
+
+// cookieSecure mirrors the session manager's setting so our handshake
+// cookie is only sent over HTTPS in production.
+func (h *WebAuthnHandler) cookieSecure() bool {
+	return h.sess.SecureCookies()
 }

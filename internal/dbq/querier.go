@@ -28,6 +28,7 @@ type Querier interface {
 	DeleteSession(ctx context.Context, id string) error
 	DeleteWebAuthnCredential(ctx context.Context, arg DeleteWebAuthnCredentialParams) error
 	DisableTOTP(ctx context.Context, userID int64) error
+	ExtendSessionExpiry(ctx context.Context, arg ExtendSessionExpiryParams) error
 	GetMediaForDelete(ctx context.Context, arg GetMediaForDeleteParams) (GetMediaForDeleteRow, error)
 	GetMember(ctx context.Context, id int64) (GetMemberRow, error)
 	GetPost(ctx context.Context, arg GetPostParams) (GetPostRow, error)
