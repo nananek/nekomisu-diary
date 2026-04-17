@@ -2,7 +2,7 @@
 # Produces a small Alpine image with the Go server binary + SPA assets.
 # Used by GHCR releases.
 
-FROM golang:1.25-alpine AS go-builder
+FROM golang:1.26-alpine AS go-builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
