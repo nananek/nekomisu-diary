@@ -140,6 +140,16 @@ export const api = {
       body: JSON.stringify(credential),
     }).then(r => r.json()),
 
+  webauthnDiscoverableBegin: () =>
+    request<import('./lib/webauthn').LoginOptionsJSON>('/api/auth/webauthn/discoverable/begin', { method: 'POST' }),
+  webauthnDiscoverableFinish: (credential: unknown): Promise<{ ok?: boolean; error?: string }> =>
+    fetch('/api/auth/webauthn/discoverable/finish', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(credential),
+    }).then(r => r.json()),
+
   // Posts
   posts: (page = 1) =>
     request<{ posts: Post[]; total: number; page: number; pages: number }>(`/api/posts?page=${page}`),

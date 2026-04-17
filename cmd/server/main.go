@@ -107,6 +107,10 @@ func main() {
 	mux.HandleFunc("POST /api/auth/webauthn/login/begin", waH.LoginBegin)
 	mux.HandleFunc("POST /api/auth/webauthn/login/finish", waH.LoginFinish)
 
+	// Passkey-only sign-in (no username required)
+	mux.HandleFunc("POST /api/auth/webauthn/discoverable/begin", waH.DiscoverableLoginBegin)
+	mux.HandleFunc("POST /api/auth/webauthn/discoverable/finish", waH.DiscoverableLoginFinish)
+
 	// Auth (session required)
 	mux.Handle("POST /api/auth/logout", requireAuth(http.HandlerFunc(auth.Logout)))
 	mux.Handle("GET /api/auth/me", injectUser(sess, http.HandlerFunc(auth.Me)))

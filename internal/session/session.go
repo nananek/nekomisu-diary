@@ -14,8 +14,12 @@ import (
 
 const (
 	CookieName = "session"
-	TTL        = 30 * 24 * time.Hour
-	PendingTTL = 5 * time.Minute
+	// Fixed window is 180 days; rolling extension happens on every Get()
+	// when less than rollingThreshold of the TTL remains, so active users
+	// effectively never log out.
+	TTL               = 180 * 24 * time.Hour
+	rollingThreshold  = TTL / 2
+	PendingTTL        = 5 * time.Minute
 )
 
 type Manager struct {
@@ -35,6 +39,10 @@ func (m *Manager) WithSecureCookies(secure bool) *Manager {
 	m.secure = secure
 	return m
 }
+
+// SecureCookies reports whether cookies issued by this Manager have the
+// Secure flag set.
+func (m *Manager) SecureCookies() bool { return m.secure }
 
 type UserInfo struct {
 	UserID      int64
@@ -112,6 +120,21 @@ func (m *Manager) get(r *http.Request, verified bool) (*UserInfo, error) {
 		}
 		return nil, err
 	}
+
+	// Rolling session: if the remaining TTL is less than half the full
+	// TTL, extend expires_at back to now+TTL so active users never log
+	// out. Only applies to verified sessions (not 2FA-pending).
+	if verified {
+		remaining := time.Until(row.ExpiresAt)
+		if remaining < rollingThreshold {
+			newExpiry := time.Now().Add(TTL)
+			_ = m.q.ExtendSessionExpiry(r.Context(), dbq.ExtendSessionExpiryParams{
+				ExpiresAt: newExpiry,
+				ID:        c.Value,
+			})
+		}
+	}
+
 	info := &UserInfo{
 		UserID:      row.UserID,
 		Login:       row.Login,

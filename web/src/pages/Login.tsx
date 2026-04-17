@@ -73,6 +73,26 @@ export default function Login() {
     }
   }
 
+  // Passkey-only sign in: no username/password required.
+  const signInWithPasskey = async () => {
+    setError('')
+    try {
+      const options = await api.webauthnDiscoverableBegin()
+      const publicKey = decodeLogin(options)
+      const assertion = await navigator.credentials.get({ publicKey }) as PublicKeyCredential
+      const result = await api.webauthnDiscoverableFinish(encodeAssertion(assertion))
+      if (result.ok) {
+        const user = await api.me()
+        setUser(user)
+        nav('/')
+      } else {
+        setError(result.error || 'パスキー認証に失敗しました')
+      }
+    } catch (err) {
+      setError(errMessage(err, 'パスキー認証に失敗しました'))
+    }
+  }
+
   if (mode === '2fa') {
     return (
       <div className="login-page">
@@ -102,6 +122,10 @@ export default function Login() {
     <div className="login-page">
       <div className="login-card card">
         <h1>ねこのみすきー交換日記</h1>
+        <button onClick={signInWithPasskey} className="passkey-btn" style={{ width: '100%', marginBottom: 12 }}>
+          <Icon name="key" size={18} />パスキーでサインイン
+        </button>
+        <div className="login-separator"><span>または</span></div>
         <form onSubmit={submit}>
           <input placeholder="ログインID" value={login} onChange={e => setLogin(e.target.value)} required autoFocus />
           {mode === 'register' && (
