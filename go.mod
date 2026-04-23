@@ -7,7 +7,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/go-sql-driver/mysql v1.9.3
-	github.com/go-webauthn/webauthn v0.16.4
+	github.com/go-webauthn/webauthn v0.17.0
 	github.com/lib/pq v1.12.3
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/pquerna/otp v1.5.0
@@ -48,7 +48,7 @@ require (
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
-	github.com/tinylib/msgp v1.6.3 // indirect
+	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.uber.org/multierr v1.11.0 // indirect
