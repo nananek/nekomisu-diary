@@ -13,7 +13,7 @@ require (
 	github.com/pquerna/otp v1.5.0
 	github.com/pressly/goose/v3 v3.27.1
 	golang.org/x/crypto v0.51.0
-	golang.org/x/image v0.40.0
+	golang.org/x/image v0.41.0
 )
 
 require (
