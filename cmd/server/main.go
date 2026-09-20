@@ -214,11 +214,22 @@ func injectUser(sess *session.Manager, next http.Handler) http.Handler {
 func spaHandler(dir string) http.Handler {
 	fs := http.Dir(dir)
 	fileServer := http.FileServer(fs)
+	// os.Root confines the existence check to `dir`, so a user-controlled
+	// URL path containing `..` (or a symlink) cannot escape the web root
+	// (path traversal). Go 1.24+.
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		log.Fatalf("spaHandler: open web dir %q: %v", dir, err)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		if _, err := os.Stat(filepath.Join(dir, path)); err == nil {
-			fileServer.ServeHTTP(w, r)
-			return
+		// Normalise to a dir-relative path; root.Stat rejects anything that
+		// would resolve outside `dir`.
+		rel := strings.TrimPrefix(filepath.Clean("/"+r.URL.Path), "/")
+		if rel != "" {
+			if _, err := root.Stat(rel); err == nil {
+				fileServer.ServeHTTP(w, r)
+				return
+			}
 		}
 		http.ServeFile(w, r, filepath.Join(dir, "index.html"))
 	})
@@ -243,6 +254,9 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		log.Printf("%s %s %s", r.Method, r.URL.Path, time.Since(start).Round(time.Microsecond))
+		// Strip CR/LF from the user-controlled path so a crafted URL cannot
+		// forge additional log lines (log injection).
+		safePath := strings.ReplaceAll(strings.ReplaceAll(r.URL.Path, "\n", ""), "\r", "")
+		log.Printf("%s %s %s", r.Method, safePath, time.Since(start).Round(time.Microsecond))
 	})
 }
