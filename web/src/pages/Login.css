@@ -47,3 +47,32 @@
 .passkey-btn:hover {
   background: var(--accent-light);
 }
+
+.misskey-btn {
+  border-color: #86b300;
+  color: #86b300;
+  font-weight: 500;
+}
+.misskey-btn:hover:not(:disabled) {
+  background: rgba(134, 179, 0, 0.12);
+}
+.misskey-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+[data-theme="dark"] .misskey-btn {
+  border-color: #a3d400;
+  color: #a3d400;
+}
+[data-theme="dark"] .misskey-btn:hover:not(:disabled) {
+  background: rgba(163, 212, 0, 0.14);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .misskey-btn {
+    border-color: #a3d400;
+    color: #a3d400;
+  }
+  :root:not([data-theme="light"]) .misskey-btn:hover:not(:disabled) {
+    background: rgba(163, 212, 0, 0.14);
+  }
+}

@@ -62,6 +62,7 @@ services:
       - -rp-id=${RP_ID}
       - -rp-origin=${RP_ORIGIN}
       - -discord-webhook=${DISCORD_WEBHOOK:-}
+      - -misskey-instance=${MISSKEY_INSTANCE:-}
     volumes:
       - ./uploads:/app/uploads
     network_mode: "service:tailscale"

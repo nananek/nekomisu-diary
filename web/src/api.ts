@@ -150,6 +150,12 @@ export const api = {
       body: JSON.stringify(credential),
     }).then(r => r.json()),
 
+  // MiAuth (Misskey sign-in)
+  miauthConfig: () => request<{ enabled: boolean }>('/api/auth/miauth/config'),
+  miauthStart: () => request<{ url: string }>('/api/auth/miauth/start', { method: 'POST' }),
+  miauthFinish: (session: string) =>
+    request<LoginResult>('/api/auth/miauth/finish', { method: 'POST', body: JSON.stringify({ session }) }),
+
   // Posts
   posts: (page = 1) =>
     request<{ posts: Post[]; total: number; page: number; pages: number }>(`/api/posts?page=${page}`),

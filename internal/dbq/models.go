@@ -35,6 +35,15 @@ type Medium struct {
 	WpAttachmentID sql.NullInt64
 }
 
+type MisskeyLink struct {
+	ID              int64
+	UserID          int64
+	MisskeyInstance string
+	MisskeyUserID   string
+	MisskeyUsername string
+	CreatedAt       time.Time
+}
+
 type Post struct {
 	ID          int64
 	AuthorID    int64

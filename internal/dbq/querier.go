@@ -39,6 +39,7 @@ type Querier interface {
 	GetUnverifiedTOTPSecret(ctx context.Context, userID int64) (string, error)
 	GetUserByID(ctx context.Context, id int64) (GetUserByIDRow, error)
 	GetUserByLogin(ctx context.Context, login string) (GetUserByLoginRow, error)
+	GetUserIDByMisskeyAccount(ctx context.Context, arg GetUserIDByMisskeyAccountParams) (int64, error)
 	GetUserPasswordHash(ctx context.Context, id int64) (string, error)
 	GetVerifiedTOTPSecret(ctx context.Context, userID int64) (string, error)
 	ListComments(ctx context.Context, postID int64) ([]ListCommentsRow, error)

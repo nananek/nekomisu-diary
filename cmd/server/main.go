@@ -25,6 +25,8 @@ func main() {
 	rpID := flag.String("rp-id", "localhost", "WebAuthn Relying Party ID (domain)")
 	rpOrigin := flag.String("rp-origin", "http://localhost:3000", "WebAuthn Relying Party origin")
 	discordWebhook := flag.String("discord-webhook", "", "Discord webhook URL for post/comment notifications")
+	misskeyInstance := flag.String("misskey-instance", "", "Misskey instance origin for MiAuth login, e.g. https://kamisato.example.ts.net (empty disables it)")
+	misskeyAppName := flag.String("misskey-app-name", "ねこのみすきー交換日記", "App name shown on the Misskey MiAuth consent screen")
 	cookieSecure := flag.Bool("cookie-secure", true, "Set Secure flag on session cookies (HTTPS only). Turn off for plain-HTTP local dev.")
 	allowRegistration := flag.Bool("allow-registration", false, "Allow unauthenticated POST /api/auth/register. Off by default.")
 	maxBodyBytes := flag.Int64("max-body-bytes", 1<<20, "Maximum JSON request body size in bytes")
@@ -66,10 +68,13 @@ func main() {
 	loginRate := ratelimit.New(10, 10*time.Minute)
 	// 2FA: 5 attempts / 10 min per login + per IP
 	twoFARate := ratelimit.New(5, 10*time.Minute)
+	// MiAuth: 10 attempts / 10 min per IP (start and finish tracked separately)
+	miauthRate := ratelimit.New(10, 10*time.Minute)
 	go func() {
 		for {
 			loginRate.Cleanup()
 			twoFARate.Cleanup()
+			miauthRate.Cleanup()
 			time.Sleep(5 * time.Minute)
 		}
 	}()
@@ -87,6 +92,12 @@ func main() {
 	}
 	waH.WithRateLimit(twoFARate)
 	_ = *allowRegistration // used above
+
+	miauthH := handler.NewMiAuthHandler(pool, sess, *misskeyInstance, *misskeyAppName, *rpOrigin).
+		WithRateLimit(miauthRate)
+	if miauthH.Enabled() {
+		log.Printf("MiAuth login enabled against %s", *misskeyInstance)
+	}
 
 	members := handler.NewMemberHandler(pool)
 	unread := handler.NewUnreadHandler(pool)
@@ -110,6 +121,11 @@ func main() {
 	// Passkey-only sign-in (no username required)
 	mux.HandleFunc("POST /api/auth/webauthn/discoverable/begin", waH.DiscoverableLoginBegin)
 	mux.HandleFunc("POST /api/auth/webauthn/discoverable/finish", waH.DiscoverableLoginFinish)
+
+	// MiAuth (Misskey) sign-in — linking is admin-only via cmd/miauthlink
+	mux.HandleFunc("GET /api/auth/miauth/config", miauthH.Config)
+	mux.HandleFunc("POST /api/auth/miauth/start", miauthH.Start)
+	mux.HandleFunc("POST /api/auth/miauth/finish", miauthH.Finish)
 
 	// Auth (session required)
 	mux.Handle("POST /api/auth/logout", requireAuth(http.HandlerFunc(auth.Logout)))

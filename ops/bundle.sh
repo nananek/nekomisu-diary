@@ -42,7 +42,7 @@ docker run --rm \
   -v "$ROOT":/app -w /app \
   -e GOTOOLCHAIN=auto -e CGO_ENABLED=0 \
   golang:1.24-alpine \
-  sh -c "go build -ldflags='-s -w' -o bin/server ./cmd/server/ && go build -ldflags='-s -w' -o bin/passwdreset ./cmd/passwdreset/ && go build -ldflags='-s -w' -o bin/diary-tui ./cmd/diary-tui/"
+  sh -c "go build -ldflags='-s -w' -o bin/server ./cmd/server/ && go build -ldflags='-s -w' -o bin/passwdreset ./cmd/passwdreset/ && go build -ldflags='-s -w' -o bin/miauthlink ./cmd/miauthlink/ && go build -ldflags='-s -w' -o bin/diary-tui ./cmd/diary-tui/"
 
 echo "==> refreshing frontend build"
 cd "$ROOT/web"
@@ -154,6 +154,7 @@ Tailscale admin でノードが online になっていることを確認 → ブ
 ## その他
 
 - **パスワードリセット:** `docker compose -f compose.prod.yml exec server /app/bin/passwdreset -user <login> -password <new>`
+- **Misskeyアカウント連携:** `docker compose -f compose.prod.yml exec server /app/bin/miauthlink -misskey-instance <url> -login <login> -misskey-username <name>`
 - **TUI クライアント:** `./ops/tui` （初回はイメージを自動ビルド）
 - **開発環境:** `web/` 配下に node_modules がないので `cd web && npm install`
 - **ソース改修:** `.git` があるので通常の git ワークフローで。
