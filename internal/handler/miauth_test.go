@@ -271,7 +271,10 @@ func TestMiAuth_Finish_TokenIsSingleUse(t *testing.T) {
 	}
 }
 
-func TestMiAuth_Finish_LinkedAccountWith2FA_ReturnsPendingSession(t *testing.T) {
+// A successful MiAuth exchange skips the diary's own 2FA step even when
+// the linked account has TOTP configured — it's treated as a strong
+// enough credential on its own, same as passkey discoverable login.
+func TestMiAuth_Finish_LinkedAccountWith2FA_SkipsSecondFactor(t *testing.T) {
 	ms := newMockMisskey(t)
 	h := newMiauthHarness(t, ms.URL)
 	userID := h.linkUser(t, ms.URL, "alice", "misskey-alice-id")
@@ -286,19 +289,21 @@ func TestMiAuth_Finish_LinkedAccountWith2FA_ReturnsPendingSession(t *testing.T) 
 	}
 	var out map[string]any
 	decode(t, resp, &out)
-	if out["requires_2fa"] != true {
-		t.Errorf("expected requires_2fa:true, got %v", out)
+	if out["ok"] != true {
+		t.Errorf("expected ok:true (no 2FA step), got %v", out)
+	}
+	if _, pending := out["requires_2fa"]; pending {
+		t.Errorf("did not expect requires_2fa in the response, got %v", out)
 	}
 
-	// The cookie is a pending session: enough to continue to 2FA, not
-	// enough to hit authenticated endpoints yet.
+	// The cookie is a fully verified session already.
 	cookie := firstCookie(resp)
 	if cookie == nil {
-		t.Fatal("expected pending session cookie")
+		t.Fatal("expected session cookie")
 	}
 	me := h.req(t, "GET", "/api/auth/me", nil, cookie)
-	if me.StatusCode != 401 {
-		t.Errorf("pending session should not authenticate /me, got %d", me.StatusCode)
+	if me.StatusCode != 200 {
+		t.Errorf("session from miauth login should authenticate /me, got %d", me.StatusCode)
 	}
 }
 

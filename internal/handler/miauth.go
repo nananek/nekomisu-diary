@@ -141,8 +141,11 @@ type miAuthCheckResult struct {
 // Finish is called by the frontend once the browser lands back on the
 // callback URL with ?session=<token>. It verifies the session against the
 // configured Misskey instance and, if the resulting account is linked to
-// a diary account, signs that account in (subject to 2FA, same as
-// password login).
+// a diary account, signs that account in directly — like passkey
+// discoverable login, a successful MiAuth exchange is treated as a strong
+// enough credential on its own, so the diary's own 2FA step is skipped
+// even if the linked account has TOTP/WebAuthn configured. (2FA on the
+// Misskey side, if any, already gated getting here.)
 func (h *MiAuthHandler) Finish(w http.ResponseWriter, r *http.Request) {
 	if !h.Enabled() {
 		writeJSON(w, http.StatusNotFound, M{"error": "misskey login is not configured"})
@@ -177,24 +180,6 @@ func (h *MiAuthHandler) Finish(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeJSON(w, http.StatusForbidden, M{"error": "このMisskeyアカウントは連携されていません"})
-		return
-	}
-
-	has2fa, err := h.q.UserHas2FA(r.Context(), userID)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": "internal error"})
-		return
-	}
-	if has2fa.HasTotp || has2fa.HasWebauthn {
-		if err := h.sess.Create(w, userID, false); err != nil {
-			writeJSON(w, http.StatusInternalServerError, M{"error": "session error"})
-			return
-		}
-		writeJSON(w, http.StatusOK, M{
-			"requires_2fa": true,
-			"has_totp":     has2fa.HasTotp,
-			"has_webauthn": has2fa.HasWebauthn,
-		})
 		return
 	}
 
