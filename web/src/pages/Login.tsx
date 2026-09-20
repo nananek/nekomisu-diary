@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect, useRef } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth'
 import { api } from '../api'
 import type { LoginResult } from '../api'
@@ -10,6 +10,7 @@ import './Login.css'
 export default function Login() {
   const { setUser } = useAuth()
   const nav = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [login, setLogin] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -18,6 +19,51 @@ export default function Login() {
   const [displayName, setDisplayName] = useState('')
   const [totpCode, setTotpCode] = useState('')
   const [twoFAInfo, setTwoFAInfo] = useState<{ has_totp?: boolean; has_webauthn?: boolean }>({})
+  const [miauthEnabled, setMiauthEnabled] = useState(false)
+  const [miauthBusy, setMiauthBusy] = useState(false)
+
+  useEffect(() => {
+    api.miauthConfig().then(c => setMiauthEnabled(c.enabled)).catch(() => setMiauthEnabled(false))
+  }, [])
+
+  // Misskey redirects the browser back to /login?session=<token> after the
+  // user approves on the Misskey side. Pick that up here and finish the
+  // exchange. The ref guards against React StrictMode's double effect
+  // invocation in dev racing two requests for the same (single-use) token.
+  const handledSession = useRef<string | null>(null)
+  useEffect(() => {
+    const miSession = searchParams.get('session')
+    if (!miSession || handledSession.current === miSession) return
+    handledSession.current = miSession
+    setSearchParams(prev => { prev.delete('session'); return prev }, { replace: true })
+
+    setError('')
+    setMiauthBusy(true)
+    api.miauthFinish(miSession)
+      .then(async (result: LoginResult) => {
+        if (result.requires_2fa) {
+          setTwoFAInfo({ has_totp: result.has_totp, has_webauthn: result.has_webauthn })
+          setMode('2fa')
+          return
+        }
+        const user = await api.me()
+        setUser(user)
+        nav('/')
+      })
+      .catch(err => setError(errMessage(err, 'Misskeyログインに失敗しました')))
+      .finally(() => setMiauthBusy(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const signInWithMisskey = async () => {
+    setError('')
+    try {
+      const { url } = await api.miauthStart()
+      window.location.href = url
+    } catch (err) {
+      setError(errMessage(err, 'Misskeyログインを開始できませんでした'))
+    }
+  }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -122,6 +168,11 @@ export default function Login() {
     <div className="login-page">
       <div className="login-card card">
         <h1>ねこのみすきー交換日記</h1>
+        {miauthEnabled && (
+          <button onClick={signInWithMisskey} className="misskey-btn" style={{ width: '100%', marginBottom: 12 }} disabled={miauthBusy}>
+            <Icon name="user" size={18} />{miauthBusy ? 'Misskeyでログイン中…' : 'Misskeyでログイン'}
+          </button>
+        )}
         <button onClick={signInWithPasskey} className="passkey-btn" style={{ width: '100%', marginBottom: 12 }}>
           <Icon name="key" size={18} />パスキーでサインイン
         </button>

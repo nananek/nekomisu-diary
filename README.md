@@ -8,7 +8,7 @@ Go + PostgreSQL + Vite (React) で実装しました。
 
 ## 機能
 
-- **認証:** パスワード / TOTP 2FA / WebAuthn（セキュリティキー）
+- **認証:** パスワード / TOTP 2FA / WebAuthn（セキュリティキー）/ Misskey MiAuth
 - **投稿:** 公開 / 自分のみ / 下書き、Markdown エディタ + プレビュー
 - **コメント:** ネスト返信、自分のコメントの削除
 - **メディア:** アップロード（JPEG は自動で EXIF 除去・サムネ生成）、ギャラリー
@@ -120,6 +120,56 @@ go run ./cmd/passwdreset -pg "postgres://localhost/diary?sslmode=disable" -user 
   を psql で直接実行してください
 - `-all` で出力されたパスワード一覧は安全な方法 (Discord DM、暗号化ファイル転送 等) で配布してください。シェル履歴・ログに残さないこと。
 
+## Misskey (MiAuth) ログイン
+
+パスワードの代わりに Misskey アカウントでログインできます
+([MiAuth](https://misskey-hub.net/docs/for-developers/api/token/miauth/) 方式)。
+自己登録はできません — どの Misskey アカウントがどの日記アカウントに
+ログインできるかは、サーバーに入れる人が `miauthlink` CLI で明示的に設定します。
+
+### 有効化
+
+`.env` (または `-misskey-instance` フラグ) に Misskey インスタンスの
+オリジンを設定します。空なら機能自体が無効になり、ログイン画面にボタンも
+出ません。
+
+```sh
+# .env
+MISSKEY_INSTANCE=https://misskey.your-tailnet.ts.net
+```
+
+### アカウント連携
+
+`miauthlink` バイナリはサーバーイメージに同梱されています。
+
+```sh
+# 連携（既存の連携があれば上書き）
+docker compose -f compose.prod.yml exec server \
+  /app/bin/miauthlink -pg "postgres://diary:${PG_PASSWORD}@127.0.0.1:5432/diary?sslmode=disable" \
+  -misskey-instance https://misskey.your-tailnet.ts.net \
+  -login <diaryのlogin> -misskey-username <Misskeyのユーザー名>
+
+# 一覧表示
+docker compose -f compose.prod.yml exec server \
+  /app/bin/miauthlink -pg "..." -list
+
+# 連携解除
+docker compose -f compose.prod.yml exec server \
+  /app/bin/miauthlink -pg "..." -login <diaryのlogin> -unlink
+```
+
+Misskey のユーザー名はリンク時にそのインスタンスの API (`/api/users/show`)
+で内部 ID に解決して保存するので、あとでユーザー名を変更しても連携は
+切れません。連携先はローカルアカウント限定（リモート/フェデレーション
+アカウントは拒否）で、1 日記アカウントにつき Misskey アカウントは 1 つまで。
+
+### ログイン時の挙動
+
+MiAuth で認証した Misskey アカウントが連携済みなら、そのままログイン
+成立（TOTP / WebAuthn を設定済みのアカウントは通常ログイン同様、続けて
+2段階認証を求められます）。連携されていない Misskey アカウントでは
+ログインできません。
+
 ## テスト
 
 ```sh
@@ -141,6 +191,7 @@ cd web && npx playwright test
 │   ├── sanitize-existing/  既存投稿 HTML の一括再サニタイズ
 │   ├── exif-strip/         既存 JPEG の EXIF 一括除去
 │   ├── passwdreset/        パスワードリセット CLI
+│   ├── miauthlink/         Misskey アカウント連携 CLI
 │   └── diary-tui/          TUI クライアント
 ├── internal/
 │   ├── handler/            HTTP ハンドラ
