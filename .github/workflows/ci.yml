@@ -99,6 +99,11 @@ jobs:
       - name: Build server
         run: go build -o bin/server ./cmd/server/
 
+      - name: Build mockmisskey and miauthlink
+        run: |
+          go build -o bin/mockmisskey ./cmd/mockmisskey/
+          go build -o bin/miauthlink ./cmd/miauthlink/
+
       - name: Build frontend
         working-directory: web
         run: |
@@ -109,12 +114,25 @@ jobs:
         working-directory: web
         run: npx playwright install chromium --with-deps
 
+      - name: Start mock Misskey instance
+        run: |
+          ./bin/mockmisskey -addr :3001 -username e2enekomisu &
+          sleep 1
+          curl -f http://localhost:3001/api/users/show -X POST -d '{"username":"x"}' || (echo "mockmisskey not responding"; exit 1)
+
+      - name: Link test user to the mock Misskey account
+        run: |
+          ./bin/miauthlink -pg postgres://diary:diary_dev_pw@localhost:5432/diary?sslmode=disable \
+                            -misskey-instance http://localhost:3001 \
+                            -login nananek -misskey-username e2enekomisu
+
       - name: Start server
         run: |
           ./bin/server -pg postgres://diary:diary_dev_pw@localhost:5432/diary?sslmode=disable \
                        -uploads ./uploads \
                        -web ./web/dist \
                        -cookie-secure=false \
+                       -misskey-instance http://localhost:3001 \
                        -addr :3000 &
           sleep 2
           curl -f http://localhost:3000/ || (echo "server not responding"; exit 1)

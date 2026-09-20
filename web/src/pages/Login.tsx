@@ -20,7 +20,12 @@ export default function Login() {
   const [totpCode, setTotpCode] = useState('')
   const [twoFAInfo, setTwoFAInfo] = useState<{ has_totp?: boolean; has_webauthn?: boolean }>({})
   const [miauthEnabled, setMiauthEnabled] = useState(false)
-  const [miauthBusy, setMiauthBusy] = useState(false)
+  // Lazily initialized from the URL instead of defaulting to false and
+  // flipping true in the effect below: this is what's rendered on the
+  // very first paint after Misskey redirects back with ?session=..., so
+  // there's no frame where the plain login form (autofocused login/
+  // password fields included) flashes before the effect has even run.
+  const [miauthBusy, setMiauthBusy] = useState(() => searchParams.has('session'))
 
   useEffect(() => {
     api.miauthConfig().then(c => setMiauthEnabled(c.enabled)).catch(() => setMiauthEnabled(false))
@@ -139,6 +144,21 @@ export default function Login() {
     }
   }
 
+  // Covers both the initial paint after the Misskey redirect back (lazy
+  // state above) and the request actually in flight — never the plain
+  // login/password form, which would look like the Misskey approval was
+  // ignored and the visitor was bounced back to a manual login.
+  if (miauthBusy) {
+    return (
+      <div className="login-page">
+        <div className="login-card card">
+          <h1>ねこのみすきー交換日記</h1>
+          <p className="loading">Misskeyでログイン中…</p>
+        </div>
+      </div>
+    )
+  }
+
   if (mode === '2fa') {
     return (
       <div className="login-page">
@@ -169,8 +189,8 @@ export default function Login() {
       <div className="login-card card">
         <h1>ねこのみすきー交換日記</h1>
         {miauthEnabled && (
-          <button onClick={signInWithMisskey} className="misskey-btn" style={{ width: '100%', marginBottom: 12 }} disabled={miauthBusy}>
-            <Icon name="user" size={18} />{miauthBusy ? 'Misskeyでログイン中…' : 'Misskeyでログイン'}
+          <button onClick={signInWithMisskey} className="misskey-btn" style={{ width: '100%', marginBottom: 12 }}>
+            <Icon name="user" size={18} />Misskeyでログイン
           </button>
         )}
         <button onClick={signInWithPasskey} className="passkey-btn" style={{ width: '100%', marginBottom: 12 }}>

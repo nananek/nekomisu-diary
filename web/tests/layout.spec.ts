@@ -13,7 +13,7 @@ async function login(page: import('@playwright/test').Page) {
   await page.goto('/login')
   await page.getByPlaceholder('ログインID').fill(LOGIN)
   await page.getByPlaceholder('パスワード').fill(PASSWORD)
-  await page.getByRole('button', { name: 'ログイン' }).click()
+  await page.getByRole('button', { name: 'ログイン', exact: true }).click()
   await page.waitForURL('/')
 }
 

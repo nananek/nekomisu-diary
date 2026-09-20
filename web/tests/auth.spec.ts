@@ -6,7 +6,7 @@ test.describe('Authentication', () => {
     await page.goto('/login')
     await page.getByPlaceholder('ログインID').fill('nonexistent')
     await page.getByPlaceholder('パスワード').fill('wrongpass')
-    await page.getByRole('button', { name: 'ログイン' }).click()
+    await page.getByRole('button', { name: 'ログイン', exact: true }).click()
     await expect(page.locator('.error')).toBeVisible()
     await expect(page).toHaveURL(/\/login/)
   })

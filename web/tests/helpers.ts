@@ -9,7 +9,7 @@ export async function loginUI(page: Page, creds = TEST_USER) {
   await page.goto('/login')
   await page.getByPlaceholder('ログインID').fill(creds.login)
   await page.getByPlaceholder('パスワード').fill(creds.password)
-  await page.getByRole('button', { name: 'ログイン' }).click()
+  await page.getByRole('button', { name: 'ログイン', exact: true }).click()
   await page.waitForURL('/')
 }
 
