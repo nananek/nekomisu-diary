@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/nananek/nekomisu-diary/internal/handler"
@@ -16,34 +17,57 @@ import (
 )
 
 // mockMisskey plays the Misskey side of MiAuth just enough for these
-// tests: POST /api/miauth/{token}/check reports ok:true + a user only for
-// tokens the test has explicitly "approved" (simulating the human clicking
-// Approve on the real instance).
+// tests: POST /api/miauth/{token}/check reports ok:true + a user (and a
+// synthetic access token, "at-"+token) only for tokens the test has
+// explicitly "approved" (simulating the human clicking Approve on the real
+// instance). It also serves POST /api/i/revoke-token, recording which
+// access tokens got self-revoked so tests can assert on cleanup.
 type mockMisskey struct {
 	*httptest.Server
-	approved map[string]string // token -> misskey user id
+	mu       sync.Mutex
+	approved map[string]string // miauth session token -> misskey user id
+	revoked  []string          // access tokens passed to i/revoke-token
 }
 
 func newMockMisskey(t *testing.T) *mockMisskey {
 	t.Helper()
 	m := &mockMisskey{approved: map[string]string{}}
 	m.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-		if len(parts) != 4 || parts[0] != "api" || parts[1] != "miauth" || parts[3] != "check" {
-			w.WriteHeader(http.StatusNotFound)
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/api/i/revoke-token":
+			var body struct {
+				I     string `json:"i"`
+				Token string `json:"token"`
+			}
+			json.NewDecoder(r.Body).Decode(&body)
+			if body.I == "" || body.I != body.Token {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			m.mu.Lock()
+			m.revoked = append(m.revoked, body.I)
+			m.mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
 			return
+		default:
+			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+			if len(parts) != 4 || parts[0] != "api" || parts[1] != "miauth" || parts[3] != "check" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			token := parts[2]
+			w.Header().Set("Content-Type", "application/json")
+			id, ok := m.approved[token]
+			if !ok {
+				json.NewEncoder(w).Encode(map[string]any{"ok": false})
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"ok":    true,
+				"token": "at-" + token,
+				"user":  map[string]any{"id": id, "username": "misskeyuser"},
+			})
 		}
-		token := parts[2]
-		w.Header().Set("Content-Type", "application/json")
-		id, ok := m.approved[token]
-		if !ok {
-			json.NewEncoder(w).Encode(map[string]any{"ok": false})
-			return
-		}
-		json.NewEncoder(w).Encode(map[string]any{
-			"ok":   true,
-			"user": map[string]any{"id": id, "username": "misskeyuser"},
-		})
 	}))
 	t.Cleanup(m.Close)
 	return m
@@ -51,6 +75,12 @@ func newMockMisskey(t *testing.T) *mockMisskey {
 
 func (m *mockMisskey) approve(token, misskeyUserID string) {
 	m.approved[token] = misskeyUserID
+}
+
+func (m *mockMisskey) revokedTokens() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.revoked...)
 }
 
 type miauthHarness struct {
@@ -304,6 +334,36 @@ func TestMiAuth_Finish_LinkedAccountWith2FA_SkipsSecondFactor(t *testing.T) {
 	me := h.req(t, "GET", "/api/auth/me", nil, cookie)
 	if me.StatusCode != 200 {
 		t.Errorf("session from miauth login should authenticate /me, got %d", me.StatusCode)
+	}
+}
+
+// A second MiAuth login for the same linked Misskey account must revoke
+// the token from the previous login, so "連携アプリ" on the Misskey side
+// doesn't grow by one entry every time the member re-authenticates.
+func TestMiAuth_Finish_RevokesPreviousToken(t *testing.T) {
+	ms := newMockMisskey(t)
+	h := newMiauthHarness(t, ms.URL)
+	h.linkUser(t, ms.URL, "alice", "misskey-alice-id")
+
+	firstToken := startMiauth(t, h)
+	ms.approve(firstToken, "misskey-alice-id")
+	if resp := h.req(t, "POST", "/api/auth/miauth/finish", map[string]string{"session": firstToken}); resp.StatusCode != 200 {
+		t.Fatalf("first login: got %d", resp.StatusCode)
+	}
+	if got := ms.revokedTokens(); len(got) != 0 {
+		t.Fatalf("first login should not revoke anything yet, got %v", got)
+	}
+
+	secondToken := startMiauth(t, h)
+	ms.approve(secondToken, "misskey-alice-id")
+	if resp := h.req(t, "POST", "/api/auth/miauth/finish", map[string]string{"session": secondToken}); resp.StatusCode != 200 {
+		t.Fatalf("second login: got %d", resp.StatusCode)
+	}
+
+	want := "at-" + firstToken
+	got := ms.revokedTokens()
+	if len(got) != 1 || got[0] != want {
+		t.Errorf("expected the first login's token %q to be revoked, got %v", want, got)
 	}
 }
 

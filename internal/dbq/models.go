@@ -42,6 +42,7 @@ type MisskeyLink struct {
 	MisskeyUserID   string
 	MisskeyUsername string
 	CreatedAt       time.Time
+	LastMiauthToken sql.NullString
 }
 
 type Post struct {

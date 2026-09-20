@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -131,8 +132,9 @@ func (h *MiAuthHandler) Start(w http.ResponseWriter, r *http.Request) {
 }
 
 type miAuthCheckResult struct {
-	OK   bool `json:"ok"`
-	User struct {
+	OK    bool   `json:"ok"`
+	Token string `json:"token"`
+	User  struct {
 		ID       string `json:"id"`
 		Username string `json:"username"`
 	} `json:"user"`
@@ -174,7 +176,7 @@ func (h *MiAuthHandler) Finish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, err := h.q.GetUserIDByMisskeyAccount(r.Context(), dbq.GetUserIDByMisskeyAccountParams{
+	link, err := h.q.GetMisskeyLink(r.Context(), dbq.GetMisskeyLinkParams{
 		MisskeyInstance: h.instance,
 		MisskeyUserID:   check.User.ID,
 	})
@@ -183,10 +185,27 @@ func (h *MiAuthHandler) Finish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.sess.Create(w, userID, true); err != nil {
+	if err := h.sess.Create(w, link.UserID, true); err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "session error"})
 		return
 	}
+
+	// Best-effort cleanup: MiAuth mints a brand new Misskey access token on
+	// every approval and Misskey never expires or dedupes them, so without
+	// this, "連携アプリ" grows by one entry every time the diary session
+	// expires and the member logs back in. Revoking (and remembering) the
+	// token never blocks or fails the login itself.
+	if link.LastMiauthToken.Valid && link.LastMiauthToken.String != check.Token {
+		logIfErr("miauth: revoke previous token", h.revokeToken(r.Context(), link.LastMiauthToken.String))
+	}
+	if check.Token != "" {
+		logIfErr("miauth: store token", h.q.SetMisskeyLinkToken(r.Context(), dbq.SetMisskeyLinkTokenParams{
+			MisskeyInstance: h.instance,
+			MisskeyUserID:   check.User.ID,
+			LastMiauthToken: sql.NullString{String: check.Token, Valid: true},
+		}))
+	}
+
 	writeJSON(w, http.StatusOK, M{"ok": true})
 }
 
@@ -212,4 +231,32 @@ func (h *MiAuthHandler) checkSession(ctx context.Context, token string) (*miAuth
 		return nil, err
 	}
 	return &out, nil
+}
+
+// revokeToken calls POST {instance}/api/i/revoke-token, authenticated with
+// the very token being revoked. Misskey's i/revoke-token deliberately lets
+// a credentialed token revoke only itself regardless of what permission
+// scope it holds (that's the one case where it bypasses the normal
+// permission check), which is exactly what's needed here: the MiAuth token
+// Start requests carries no scope at all, yet it can still self-destruct.
+func (h *MiAuthHandler) revokeToken(ctx context.Context, token string) error {
+	body, err := json.Marshal(M{"i": token, "token": token})
+	if err != nil {
+		return err
+	}
+	endpoint := fmt.Sprintf("%s/api/i/revoke-token", h.instance)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("miauth revoke-token: unexpected status %d", resp.StatusCode)
+	}
+	return nil
 }

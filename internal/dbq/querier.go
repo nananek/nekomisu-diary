@@ -31,6 +31,7 @@ type Querier interface {
 	ExtendSessionExpiry(ctx context.Context, arg ExtendSessionExpiryParams) error
 	GetMediaForDelete(ctx context.Context, arg GetMediaForDeleteParams) (GetMediaForDeleteRow, error)
 	GetMember(ctx context.Context, id int64) (GetMemberRow, error)
+	GetMisskeyLink(ctx context.Context, arg GetMisskeyLinkParams) (GetMisskeyLinkRow, error)
 	GetPost(ctx context.Context, arg GetPostParams) (GetPostRow, error)
 	GetPostForAuthorization(ctx context.Context, id int64) (GetPostForAuthorizationRow, error)
 	GetPostTitle(ctx context.Context, id int64) (string, error)
@@ -39,7 +40,6 @@ type Querier interface {
 	GetUnverifiedTOTPSecret(ctx context.Context, userID int64) (string, error)
 	GetUserByID(ctx context.Context, id int64) (GetUserByIDRow, error)
 	GetUserByLogin(ctx context.Context, login string) (GetUserByLoginRow, error)
-	GetUserIDByMisskeyAccount(ctx context.Context, arg GetUserIDByMisskeyAccountParams) (int64, error)
 	GetUserPasswordHash(ctx context.Context, id int64) (string, error)
 	GetVerifiedTOTPSecret(ctx context.Context, userID int64) (string, error)
 	ListComments(ctx context.Context, postID int64) ([]ListCommentsRow, error)
@@ -51,6 +51,7 @@ type Querier interface {
 	ListWebAuthnCredentials(ctx context.Context, userID int64) ([]ListWebAuthnCredentialsRow, error)
 	LoadWebAuthnCredentials(ctx context.Context, userID int64) ([]LoadWebAuthnCredentialsRow, error)
 	SearchPosts(ctx context.Context, arg SearchPostsParams) ([]SearchPostsRow, error)
+	SetMisskeyLinkToken(ctx context.Context, arg SetMisskeyLinkTokenParams) error
 	UpdatePostBody(ctx context.Context, arg UpdatePostBodyParams) error
 	UpdatePostBodyMD(ctx context.Context, arg UpdatePostBodyMDParams) error
 	UpdatePostTitle(ctx context.Context, arg UpdatePostTitleParams) error

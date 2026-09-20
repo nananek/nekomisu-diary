@@ -7,21 +7,44 @@ package dbq
 
 import (
 	"context"
+	"database/sql"
 )
 
-const getUserIDByMisskeyAccount = `-- name: GetUserIDByMisskeyAccount :one
-SELECT user_id FROM misskey_links
+const getMisskeyLink = `-- name: GetMisskeyLink :one
+SELECT user_id, last_miauth_token FROM misskey_links
 WHERE misskey_instance = $1 AND misskey_user_id = $2
 `
 
-type GetUserIDByMisskeyAccountParams struct {
+type GetMisskeyLinkParams struct {
 	MisskeyInstance string
 	MisskeyUserID   string
 }
 
-func (q *Queries) GetUserIDByMisskeyAccount(ctx context.Context, arg GetUserIDByMisskeyAccountParams) (int64, error) {
-	row := q.db.QueryRowContext(ctx, getUserIDByMisskeyAccount, arg.MisskeyInstance, arg.MisskeyUserID)
-	var user_id int64
-	err := row.Scan(&user_id)
-	return user_id, err
+type GetMisskeyLinkRow struct {
+	UserID          int64
+	LastMiauthToken sql.NullString
+}
+
+func (q *Queries) GetMisskeyLink(ctx context.Context, arg GetMisskeyLinkParams) (GetMisskeyLinkRow, error) {
+	row := q.db.QueryRowContext(ctx, getMisskeyLink, arg.MisskeyInstance, arg.MisskeyUserID)
+	var i GetMisskeyLinkRow
+	err := row.Scan(&i.UserID, &i.LastMiauthToken)
+	return i, err
+}
+
+const setMisskeyLinkToken = `-- name: SetMisskeyLinkToken :exec
+UPDATE misskey_links
+SET last_miauth_token = $3
+WHERE misskey_instance = $1 AND misskey_user_id = $2
+`
+
+type SetMisskeyLinkTokenParams struct {
+	MisskeyInstance string
+	MisskeyUserID   string
+	LastMiauthToken sql.NullString
+}
+
+func (q *Queries) SetMisskeyLinkToken(ctx context.Context, arg SetMisskeyLinkTokenParams) error {
+	_, err := q.db.ExecContext(ctx, setMisskeyLinkToken, arg.MisskeyInstance, arg.MisskeyUserID, arg.LastMiauthToken)
+	return err
 }
