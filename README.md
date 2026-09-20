@@ -65,7 +65,9 @@ docker compose -f compose.prod.yml up -d
 ## パスワードリセット
 
 メール基盤は持っていないので、リセットは管理者 (サーバーに入れる人) が CLI で行います。
-`passwdreset` バイナリはサーバーイメージに同梱されています。
+`passwdreset` バイナリはサーバーイメージに同梱されています。`-pg` は省略すると
+`compose.prod.yml` がサーバーコンテナに設定する `$DIARY_PG_DSN` を使うので、
+本番では基本的に指定不要です。
 
 ### 3つのモード
 
@@ -82,17 +84,15 @@ docker compose -f compose.prod.yml up -d
 ```sh
 # 1人、パスワード指定
 docker compose -f compose.prod.yml exec server \
-  /app/bin/passwdreset \
-  -pg "postgres://diary:${PG_PASSWORD}@127.0.0.1:5432/diary?sslmode=disable" \
-  -user <login> -password <新しいパスワード>
+  /app/bin/passwdreset -user <login> -password <新しいパスワード>
 
 # 1人、ランダム (標準出力に表示された文字列を渡す)
 docker compose -f compose.prod.yml exec server \
-  /app/bin/passwdreset -pg "..." -user <login> -random
+  /app/bin/passwdreset -user <login> -random
 
 # 全員リセット (対話的確認あり、login<TAB>password で出力)
 docker compose -f compose.prod.yml exec -T server \
-  /app/bin/passwdreset -pg "..." -all -random > new-passwords.tsv
+  /app/bin/passwdreset -all -random > new-passwords.tsv
 # ※ compose exec に -T (no TTY) + 対話入力できない環境では -yes が必要
 ```
 
@@ -140,22 +140,23 @@ MISSKEY_INSTANCE=https://misskey.your-tailnet.ts.net
 
 ### アカウント連携
 
-`miauthlink` バイナリはサーバーイメージに同梱されています。
+`miauthlink` バイナリはサーバーイメージに同梱されています。`-pg` /
+`-misskey-instance` は省略すると `compose.prod.yml` がサーバーコンテナに
+設定する `$DIARY_PG_DSN` / `$MISSKEY_INSTANCE` を使うので、本番では
+基本的に指定不要です。
 
 ```sh
 # 連携（既存の連携があれば上書き）
 docker compose -f compose.prod.yml exec server \
-  /app/bin/miauthlink -pg "postgres://diary:${PG_PASSWORD}@127.0.0.1:5432/diary?sslmode=disable" \
-  -misskey-instance https://misskey.your-tailnet.ts.net \
-  -login <diaryのlogin> -misskey-username <Misskeyのユーザー名>
+  /app/bin/miauthlink -login <diaryのlogin> -misskey-username <Misskeyのユーザー名>
 
 # 一覧表示
 docker compose -f compose.prod.yml exec server \
-  /app/bin/miauthlink -pg "..." -list
+  /app/bin/miauthlink -list
 
 # 連携解除
 docker compose -f compose.prod.yml exec server \
-  /app/bin/miauthlink -pg "..." -login <diaryのlogin> -unlink
+  /app/bin/miauthlink -login <diaryのlogin> -unlink
 ```
 
 Misskey のユーザー名はリンク時にそのインスタンスの API (`/api/users/show`)

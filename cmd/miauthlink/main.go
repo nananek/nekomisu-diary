@@ -4,6 +4,10 @@
 // Misskey account" flow in the app itself, so this is the only way to
 // create, change, or remove a link.
 //
+// -pg and -misskey-instance fall back to $DIARY_PG_DSN / $MISSKEY_INSTANCE
+// when omitted, which compose.prod.yml sets on the server container — so
+// `docker compose exec server /app/bin/miauthlink ...` needs neither flag.
+//
 // Three modes:
 //
 //  1. Link (or replace) a diary account's Misskey account:
@@ -35,14 +39,20 @@ import (
 )
 
 func main() {
-	pgDSN := flag.String("pg", "", "PostgreSQL DSN (required)")
-	instance := flag.String("misskey-instance", "", "Misskey instance origin, e.g. https://kamisato.example.ts.net (required to link)")
+	pgDSN := flag.String("pg", "", "PostgreSQL DSN (falls back to $DIARY_PG_DSN, required one way or the other)")
+	instance := flag.String("misskey-instance", "", "Misskey instance origin, e.g. https://kamisato.example.ts.net (falls back to $MISSKEY_INSTANCE; required to link)")
 	login := flag.String("login", "", "nekomisu-diary login to link/unlink")
 	misskeyUsername := flag.String("misskey-username", "", "Misskey username to link (resolved via the instance's API)")
 	unlink := flag.Bool("unlink", false, "Remove the Misskey link for -login")
 	list := flag.Bool("list", false, "List all Misskey account links")
 	flag.Parse()
 
+	if *pgDSN == "" {
+		*pgDSN = os.Getenv("DIARY_PG_DSN")
+	}
+	if *instance == "" {
+		*instance = os.Getenv("MISSKEY_INSTANCE")
+	}
 	if *pgDSN == "" {
 		usage()
 	}

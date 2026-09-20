@@ -54,6 +54,13 @@ services:
     depends_on:
       - postgres
       - tailscale
+    # Also exposed as real container env vars (not just baked into the
+    # server's own argv below) so `docker compose exec server /app/bin/<cli>`
+    # — passwdreset, miauthlink — can pick them up without re-typing the
+    # DSN or re-sourcing .env in your shell first.
+    environment:
+      - DIARY_PG_DSN=postgres://diary:${PG_PASSWORD}@127.0.0.1:5432/diary?sslmode=disable
+      - MISSKEY_INSTANCE=${MISSKEY_INSTANCE:-}
     command:
       - -pg=postgres://diary:${PG_PASSWORD}@127.0.0.1:5432/diary?sslmode=disable
       - -addr=:3000

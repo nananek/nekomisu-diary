@@ -10,6 +10,10 @@
 //      passwdreset -pg <dsn> -all -random
 //      Pairs of "login <TAB> password" are written to stdout — redirect to
 //      a file and distribute securely.
+//
+// -pg falls back to $DIARY_PG_DSN when omitted, which compose.prod.yml
+// sets on the server container — so `docker compose exec server
+// /app/bin/passwdreset ...` needs no -pg.
 package main
 
 import (
@@ -31,7 +35,7 @@ const randAlphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 const randDefaultLen = 16
 
 func main() {
-	pgDSN := flag.String("pg", "", "PostgreSQL DSN (required)")
+	pgDSN := flag.String("pg", "", "PostgreSQL DSN (falls back to $DIARY_PG_DSN, required one way or the other)")
 	login := flag.String("user", "", "User login name (required unless -all)")
 	newPass := flag.String("password", "", "New password (required unless -random)")
 	randomMode := flag.Bool("random", false, "Generate a random password instead of taking one from -password")
@@ -40,6 +44,9 @@ func main() {
 	yes := flag.Bool("yes", false, "Skip the interactive confirmation for -all (use with care)")
 	flag.Parse()
 
+	if *pgDSN == "" {
+		*pgDSN = os.Getenv("DIARY_PG_DSN")
+	}
 	if *pgDSN == "" {
 		usage()
 	}
