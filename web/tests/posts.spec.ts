@@ -83,6 +83,33 @@ test.describe('Posts E2E', () => {
     await expect(page.getByRole('heading', { name: title })).toBeVisible()
   })
 
+  test('draft opens from the drafts list and can be edited', async ({ page }) => {
+    const title = `下書きを開く_${Date.now()}`
+    const id = await createPost(page.context().request, title, '<p>下書きの本文</p>', 'draft')
+    createdIds.push(id)
+
+    // The edit link in the drafts list must load the draft for its author.
+    // Regression: the API used to 404 on the author's own draft, so this
+    // page bounced straight back to the timeline.
+    await page.goto('/drafts')
+    await page.getByRole('link', { name: title }).click()
+    await page.waitForURL(`/posts/${id}/edit`)
+
+    const titleInput = page.locator('input').first()
+    await expect(titleInput).toHaveValue(title)
+    await expect(page.locator('textarea')).toHaveValue(/下書きの本文/)
+
+    // Save it, still as a draft: the detail page must render for its author.
+    await titleInput.fill(title + '_編集後')
+    await page.getByRole('button', { name: /保存/ }).click()
+    await page.waitForURL(`/posts/${id}`)
+    await expect(page.getByRole('heading', { name: title + '_編集後', level: 1 })).toBeVisible()
+
+    // And the updated draft is still listed (still re-openable).
+    await page.goto('/drafts')
+    await expect(page.getByRole('link', { name: title + '_編集後' })).toBeVisible()
+  })
+
   test('search finds post by title', async ({ page }) => {
     const marker = `search${Date.now()}`
     const id = await createPost(page.context().request, `${marker}タイトル`, '<p>body</p>')

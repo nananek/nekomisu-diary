@@ -362,6 +362,101 @@ func TestPosts_Drafts_OnlyOwn(t *testing.T) {
 	}
 }
 
+func TestPosts_Draft_OwnerCanOpen(t *testing.T) {
+	h := newHarness(t)
+	_, aliceCookie := h.createUser(t, "alice", "password")
+	_, bobCookie := h.createUser(t, "bob", "password")
+
+	resp := h.req(t, "POST", "/api/posts", map[string]string{
+		"title": "書きかけ", "body": "<p>下書き本文</p>", "visibility": "draft",
+	}, aliceCookie)
+	if resp.StatusCode != 201 {
+		t.Fatalf("create draft: %d", resp.StatusCode)
+	}
+	var created map[string]any
+	decode(t, resp, &created)
+	pid := int64(created["id"].(float64))
+
+	// The author must be able to open their own draft. This used to 404 even
+	// for the author, making the drafts list's edit links a dead end.
+	resp = h.req(t, "GET", "/api/posts/"+itoa(pid), nil, aliceCookie)
+	if resp.StatusCode != 200 {
+		t.Fatalf("owner cannot open own draft: %d", resp.StatusCode)
+	}
+	var got map[string]any
+	decode(t, resp, &got)
+	if got["visibility"] != "draft" {
+		t.Errorf("visibility: got %v want draft", got["visibility"])
+	}
+	if got["body_html"] != "<p>下書き本文</p>" {
+		t.Errorf("body_html: got %v", got["body_html"])
+	}
+
+	// Other users still can't see it.
+	resp = h.req(t, "GET", "/api/posts/"+itoa(pid), nil, bobCookie)
+	if resp.StatusCode != 404 {
+		t.Errorf("other user can open draft: got %d want 404", resp.StatusCode)
+	}
+
+	// And it must not leak into the timeline or search results.
+	resp = h.req(t, "GET", "/api/posts", nil, aliceCookie)
+	var list struct {
+		Total int `json:"total"`
+	}
+	decode(t, resp, &list)
+	if list.Total != 0 {
+		t.Errorf("draft leaked into timeline: total=%d", list.Total)
+	}
+	resp = h.req(t, "GET", "/api/posts/search?q=書きかけ", nil, aliceCookie)
+	var search struct {
+		Total int `json:"total"`
+	}
+	decode(t, resp, &search)
+	if search.Total != 0 {
+		t.Errorf("draft leaked into search: total=%d", search.Total)
+	}
+}
+
+func TestPosts_Draft_EditAndPublish(t *testing.T) {
+	h := newHarness(t)
+	_, aliceCookie := h.createUser(t, "alice", "password")
+	_, bobCookie := h.createUser(t, "bob", "password")
+
+	resp := h.req(t, "POST", "/api/posts", map[string]string{
+		"title": "WIP", "body": "<p>v1</p>", "visibility": "draft",
+	}, aliceCookie)
+	var created map[string]any
+	decode(t, resp, &created)
+	pid := int64(created["id"].(float64))
+
+	// Edit the draft while it is still hidden.
+	resp = h.req(t, "PUT", "/api/posts/"+itoa(pid), map[string]string{
+		"title": "WIP2", "body": "<p>v2</p>",
+	}, aliceCookie)
+	if resp.StatusCode != 200 {
+		t.Fatalf("update draft: %d", resp.StatusCode)
+	}
+	resp = h.req(t, "GET", "/api/posts/"+itoa(pid), nil, aliceCookie)
+	var got map[string]any
+	decode(t, resp, &got)
+	if got["title"] != "WIP2" {
+		t.Errorf("title after update: got %v", got["title"])
+	}
+	if got["visibility"] != "draft" {
+		t.Errorf("visibility after update: got %v", got["visibility"])
+	}
+
+	// Publishing makes it readable by others.
+	resp = h.req(t, "PUT", "/api/posts/"+itoa(pid), map[string]string{"visibility": "public"}, aliceCookie)
+	if resp.StatusCode != 200 {
+		t.Fatalf("publish draft: %d", resp.StatusCode)
+	}
+	resp = h.req(t, "GET", "/api/posts/"+itoa(pid), nil, bobCookie)
+	if resp.StatusCode != 200 {
+		t.Errorf("published draft not visible to others: %d", resp.StatusCode)
+	}
+}
+
 func TestPosts_Search(t *testing.T) {
 	h := newHarness(t)
 	_, cookie := h.createUser(t, "alice", "password")

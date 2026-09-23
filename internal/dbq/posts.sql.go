@@ -115,7 +115,10 @@ SELECT p.id, p.author_id, u.display_name AS author_name, u.avatar_path AS author
 FROM posts p
 JOIN users u ON u.id = p.author_id
 WHERE p.id = $1
-  AND (p.visibility = 'public' OR (p.visibility = 'private' AND p.author_id = $2))
+  -- Public posts are readable by everyone; private/draft posts only by their
+  -- author ($2 is the viewer). Drafts must not appear in list/search queries,
+  -- but the author still needs to fetch one to open the editor.
+  AND (p.visibility = 'public' OR p.author_id = $2)
 `
 
 type GetPostParams struct {
@@ -477,7 +480,7 @@ func (q *Queries) UpdatePostTitle(ctx context.Context, arg UpdatePostTitleParams
 }
 
 const updatePostVisibility = `-- name: UpdatePostVisibility :exec
-UPDATE posts SET visibility = $1, published_at = COALESCE(published_at, CASE WHEN $1 = 'draft' THEN NULL ELSE NOW() END) WHERE id = $2
+UPDATE posts SET visibility = $1, published_at = COALESCE(published_at, CASE WHEN $1 = 'draft'::post_visibility THEN NULL ELSE NOW() END) WHERE id = $2
 `
 
 type UpdatePostVisibilityParams struct {

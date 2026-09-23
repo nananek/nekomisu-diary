@@ -234,22 +234,34 @@ func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	if req.Title != nil {
-		_ = h.q.UpdatePostTitle(ctx, dbq.UpdatePostTitleParams{Title: *req.Title, ID: id})
+		if err := h.q.UpdatePostTitle(ctx, dbq.UpdatePostTitleParams{Title: *req.Title, ID: id}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
+			return
+		}
 	}
 	if req.Body != nil {
-		_ = h.q.UpdatePostBody(ctx, dbq.UpdatePostBodyParams{BodyHtml: sanitize.HTML(*req.Body), ID: id})
+		if err := h.q.UpdatePostBody(ctx, dbq.UpdatePostBodyParams{BodyHtml: sanitize.HTML(*req.Body), ID: id}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
+			return
+		}
 	}
 	if req.BodyMD != nil {
-		_ = h.q.UpdatePostBodyMD(ctx, dbq.UpdatePostBodyMDParams{
+		if err := h.q.UpdatePostBodyMD(ctx, dbq.UpdatePostBodyMDParams{
 			BodyMd: sql.NullString{String: *req.BodyMD, Valid: true},
 			ID:     id,
-		})
+		}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
+			return
+		}
 	}
 	newlyPublic := false
 	if req.Visibility != nil {
-		_ = h.q.UpdatePostVisibility(ctx, dbq.UpdatePostVisibilityParams{
+		if err := h.q.UpdatePostVisibility(ctx, dbq.UpdatePostVisibilityParams{
 			Visibility: *req.Visibility, ID: id,
-		})
+		}); err != nil {
+			writeJSON(w, http.StatusInternalServerError, M{"error": "db error"})
+			return
+		}
 		if *req.Visibility == "public" && info.Visibility != "public" {
 			newlyPublic = true
 		}
