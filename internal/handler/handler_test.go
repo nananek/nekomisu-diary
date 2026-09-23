@@ -4,9 +4,16 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"image"
+	"image/gif"
+	"image/png"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -22,20 +29,23 @@ func itoa(i int64) string { return strconv.FormatInt(i, 10) }
 // --- Test harness ---
 
 type harness struct {
-	db   *sql.DB
-	sess *session.Manager
-	mux  http.Handler
+	db         *sql.DB
+	sess       *session.Manager
+	mux        http.Handler
+	uploadsDir string
 }
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	db := testutil.NewDB(t)
 	sess := session.NewManager(db)
+	uploadsDir := t.TempDir()
 
 	auth := handler.NewAuthHandler(db, sess).AllowRegistration(true)
 	posts := handler.NewPostHandler(db, nil)
 	comments := handler.NewCommentHandler(db, nil)
 	members := handler.NewMemberHandler(db)
+	media := handler.NewMediaHandler(db, uploadsDir)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/auth/login", auth.Login)
@@ -59,10 +69,14 @@ func newHarness(t *testing.T) *harness {
 	mux.Handle("DELETE /api/comments/{commentId}", handler.RequireAuth(http.HandlerFunc(comments.Delete)))
 	mux.Handle("GET /api/members", handler.RequireAuth(http.HandlerFunc(members.List)))
 
+	mux.Handle("POST /api/media/upload", handler.RequireAuth(http.HandlerFunc(media.Upload)))
+	mux.Handle("POST /api/auth/avatar", handler.RequireAuth(http.HandlerFunc(media.UploadAvatar)))
+
 	return &harness{
-		db:   db,
-		sess: sess,
-		mux:  injectUser(sess, mux),
+		db:         db,
+		sess:       sess,
+		mux:        injectUser(sess, mux),
+		uploadsDir: uploadsDir,
 	}
 }
 
@@ -92,6 +106,71 @@ func (h *harness) req(t *testing.T, method, path string, body any, cookies ...*h
 	rec := httptest.NewRecorder()
 	h.mux.ServeHTTP(rec, req)
 	return rec.Result()
+}
+
+// upload sends a multipart file to path and returns the response. The
+// filename and contentType are attacker-controlled, like in a real request.
+func (h *harness) upload(t *testing.T, path, field, filename, contentType string, data []byte, cookie *http.Cookie) *http.Response {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	part, err := mw.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": {`form-data; name="` + field + `"; filename="` + filename + `"`},
+		"Content-Type":        {contentType},
+	})
+	if err != nil {
+		t.Fatalf("multipart: %v", err)
+	}
+	if _, err := part.Write(data); err != nil {
+		t.Fatalf("multipart write: %v", err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatalf("multipart close: %v", err)
+	}
+	req := httptest.NewRequest("POST", path, &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	rec := httptest.NewRecorder()
+	h.mux.ServeHTTP(rec, req)
+	return rec.Result()
+}
+
+func pngBytes(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatalf("png encode: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func gifBytes(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := gif.Encode(&buf, image.NewRGBA(image.Rect(0, 0, 2, 2)), nil); err != nil {
+		t.Fatalf("gif encode: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func storedFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	var files []string
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk uploads: %v", err)
+	}
+	return files
 }
 
 func (h *harness) createUser(t *testing.T, login, password string) (int64, *http.Cookie) {
@@ -475,6 +554,118 @@ func TestPosts_Search(t *testing.T) {
 	}
 	if strings.Contains(result.Posts[0]["title"].(string), "犬") {
 		t.Errorf("wrong post: %v", result.Posts[0]["title"])
+	}
+}
+
+func TestPosts_VisibilityValidation(t *testing.T) {
+	h := newHarness(t)
+	_, cookie := h.createUser(t, "alice", "password")
+
+	resp := h.req(t, "POST", "/api/posts", map[string]string{
+		"title": "T", "body": "<p>x</p>", "visibility": "unlisted",
+	}, cookie)
+	if resp.StatusCode != 400 {
+		t.Errorf("create with bad visibility: got %d want 400", resp.StatusCode)
+	}
+
+	resp = h.req(t, "POST", "/api/posts", map[string]string{"title": "T", "body": "<p>x</p>"}, cookie)
+	if resp.StatusCode != 201 {
+		t.Fatalf("create: %d", resp.StatusCode)
+	}
+	var created map[string]any
+	decode(t, resp, &created)
+	pid := int64(created["id"].(float64))
+
+	resp = h.req(t, "PUT", "/api/posts/"+itoa(pid), map[string]string{"visibility": "unlisted"}, cookie)
+	if resp.StatusCode != 400 {
+		t.Errorf("update with bad visibility: got %d want 400", resp.StatusCode)
+	}
+}
+
+// --- Media tests ---
+
+func TestMedia_Upload_RejectsNonImageContent(t *testing.T) {
+	h := newHarness(t)
+	_, cookie := h.createUser(t, "alice", "password")
+
+	payload := []byte("<!doctype html><script>alert(document.cookie)</script>")
+
+	// Lying about the filename and Content-Type must not get HTML stored
+	// under /uploads, where it would be served as same-origin script.
+	resp := h.upload(t, "/api/media/upload", "file", "evil.html", "image/png", payload, cookie)
+	if resp.StatusCode != 400 {
+		t.Errorf("media upload as evil.html: got %d want 400", resp.StatusCode)
+	}
+	resp = h.upload(t, "/api/media/upload", "file", "evil.png", "image/png", payload, cookie)
+	if resp.StatusCode != 400 {
+		t.Errorf("media upload as evil.png: got %d want 400", resp.StatusCode)
+	}
+
+	// Avatars are stored at predictable URLs, so the same check applies.
+	resp = h.upload(t, "/api/auth/avatar", "file", "avatar.html", "image/png", payload, cookie)
+	if resp.StatusCode != 400 {
+		t.Errorf("avatar upload as avatar.html: got %d want 400", resp.StatusCode)
+	}
+
+	if files := storedFiles(t, h.uploadsDir); len(files) != 0 {
+		t.Errorf("rejected uploads left files on disk: %v", files)
+	}
+}
+
+func TestMedia_Upload_StoresByDecodedFormat(t *testing.T) {
+	h := newHarness(t)
+	_, cookie := h.createUser(t, "alice", "password")
+	data := pngBytes(t)
+
+	// The filename says .html and the MIME type says text/plain, but the
+	// bytes really are a PNG: accepted, stored as .png, never as .html.
+	resp := h.upload(t, "/api/media/upload", "file", "photo.html", "text/plain", data, cookie)
+	if resp.StatusCode != 201 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("media upload: got %d (%s)", resp.StatusCode, body)
+	}
+	var created map[string]any
+	decode(t, resp, &created)
+	if url, _ := created["url"].(string); !strings.HasSuffix(url, ".png") {
+		t.Errorf("stored url %q does not end in .png", url)
+	}
+
+	resp = h.upload(t, "/api/auth/avatar", "file", "a.html", "text/plain", data, cookie)
+	if resp.StatusCode != 200 {
+		t.Fatalf("avatar upload: got %d", resp.StatusCode)
+	}
+	var avatar map[string]any
+	decode(t, resp, &avatar)
+	if p, _ := avatar["avatar_path"].(string); !strings.HasSuffix(p, ".png") {
+		t.Errorf("avatar path %q does not end in .png", p)
+	}
+
+	// GIF (and WebP) uploads keep working and get their own extension.
+	resp = h.upload(t, "/api/media/upload", "file", "animation.gif", "image/gif", gifBytes(t), cookie)
+	if resp.StatusCode != 201 {
+		t.Fatalf("gif upload: got %d", resp.StatusCode)
+	}
+	var gifCreated map[string]any
+	decode(t, resp, &gifCreated)
+	if url, _ := gifCreated["url"].(string); !strings.HasSuffix(url, ".gif") {
+		t.Errorf("stored gif url %q does not end in .gif", url)
+	}
+
+	files := storedFiles(t, h.uploadsDir)
+	if len(files) != 4 {
+		t.Fatalf("expected 4 stored files (png, thumbnail, avatar, gif), got %v", files)
+	}
+	pngs := 0
+	for _, f := range files {
+		if strings.HasSuffix(f, ".html") {
+			t.Errorf("stored file %q kept a client-chosen extension", f)
+		}
+		if strings.HasSuffix(f, ".png") {
+			pngs++
+		}
+	}
+	if pngs != 2 {
+		t.Errorf("expected 2 .png files, got %d in %v", pngs, files)
 	}
 }
 

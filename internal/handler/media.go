@@ -6,10 +6,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"image"
+	_ "image/gif"
 	"image/jpeg"
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/nananek/nekomisu-diary/internal/dbq"
 	"golang.org/x/image/draw"
+	_ "golang.org/x/image/webp"
 )
 
 type MediaHandler struct {
@@ -113,27 +116,17 @@ func (h *MediaHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	mime := header.Header.Get("Content-Type")
-	if !strings.HasPrefix(mime, "image/") {
-		writeJSON(w, http.StatusBadRequest, M{"error": "only images allowed"})
+	// Validate and decode the bytes before anything touches disk. Only real
+	// JPEG/PNG/GIF/WebP content is accepted; the stored extension is derived
+	// from the decoded format, never from the client-supplied filename or
+	// Content-Type (a file named evil.html served from /uploads would run as
+	// same-origin HTML).
+	img, format, err := decodeUpload(file)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": "unsupported image format"})
 		return
 	}
-
-	ext := filepath.Ext(header.Filename)
-	if ext == "" {
-		switch mime {
-		case "image/jpeg":
-			ext = ".jpg"
-		case "image/png":
-			ext = ".png"
-		case "image/gif":
-			ext = ".gif"
-		case "image/webp":
-			ext = ".webp"
-		default:
-			ext = ".bin"
-		}
-	}
+	meta := imageFormats[format]
 
 	randBytes := make([]byte, 8)
 	rand.Read(randBytes)
@@ -144,7 +137,7 @@ func (h *MediaHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	absDir := filepath.Join(h.uploadsDir, relDir)
 	os.MkdirAll(absDir, 0o755)
 
-	storagePath := filepath.Join(relDir, randName+ext)
+	storagePath := filepath.Join(relDir, randName+meta.ext)
 	absPath := filepath.Join(h.uploadsDir, storagePath)
 
 	out, err := os.Create(absPath)
@@ -160,25 +153,22 @@ func (h *MediaHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Close()
 
-	var width, height int
+	bounds := img.Bounds()
+	width, height := bounds.Dx(), bounds.Dy()
 	var thumbnailPath sql.NullString
-	if img, format, err := decodeImage(absPath); err == nil {
-		bounds := img.Bounds()
-		width = bounds.Dx()
-		height = bounds.Dy()
-		if format == "jpeg" {
-			if err := writeJPEG(img, absPath, 95); err == nil {
-				if st, err := os.Stat(absPath); err == nil {
-					written = st.Size()
-				}
+	if format == "jpeg" {
+		// Re-encode JPEGs in place to strip EXIF metadata.
+		if err := writeJPEG(img, absPath, 95); err == nil {
+			if st, err := os.Stat(absPath); err == nil {
+				written = st.Size()
 			}
 		}
-		if format == "jpeg" || format == "png" {
-			thumbRel := strings.TrimSuffix(storagePath, filepath.Ext(storagePath)) + "-thumb.jpg"
-			thumbAbs := filepath.Join(h.uploadsDir, thumbRel)
-			if err := saveThumbnail(img, thumbAbs, 800); err == nil {
-				thumbnailPath = sql.NullString{String: thumbRel, Valid: true}
-			}
+	}
+	if format == "jpeg" || format == "png" {
+		thumbRel := strings.TrimSuffix(storagePath, filepath.Ext(storagePath)) + "-thumb.jpg"
+		thumbAbs := filepath.Join(h.uploadsDir, thumbRel)
+		if err := saveThumbnail(img, thumbAbs, 800); err == nil {
+			thumbnailPath = sql.NullString{String: thumbRel, Valid: true}
 		}
 	}
 
@@ -197,7 +187,7 @@ func (h *MediaHandler) Upload(w http.ResponseWriter, r *http.Request) {
 		Filename:       header.Filename,
 		StoragePath:    storagePath,
 		ThumbnailPath:  thumbnailPath,
-		MimeType:       mime,
+		MimeType:       meta.mime,
 		ByteSize:       sql.NullInt64{Int64: written, Valid: true},
 		Width:          nullInt32(width),
 		Height:         nullInt32(height),
@@ -228,35 +218,47 @@ func (h *MediaHandler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	file, header, err := r.FormFile("file")
+	file, _, err := r.FormFile("file")
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, M{"error": "file field required"})
 		return
 	}
 	defer file.Close()
 
-	mime := header.Header.Get("Content-Type")
-	if !strings.HasPrefix(mime, "image/") {
-		writeJSON(w, http.StatusBadRequest, M{"error": "only images allowed"})
+	// Same content-based validation as regular uploads. Avatars live at a
+	// predictable URL (/uploads/avatars/<user id><ext>), so a client-chosen
+	// extension would be an easy same-origin XSS for every member.
+	img, format, err := decodeUpload(file)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": "unsupported image format"})
 		return
 	}
-	ext := filepath.Ext(header.Filename)
-	if ext == "" {
-		ext = ".jpg"
-	}
+	meta := imageFormats[format]
 
 	avatarDir := filepath.Join(h.uploadsDir, "avatars")
 	os.MkdirAll(avatarDir, 0o755)
-	filename := fmt.Sprintf("%d%s", u.UserID, ext)
+	filename := fmt.Sprintf("%d%s", u.UserID, meta.ext)
 	absPath := filepath.Join(avatarDir, filename)
 
-	out, err := os.Create(absPath)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": "file create error"})
-		return
+	if format == "jpeg" {
+		// Re-encode to strip EXIF metadata, like regular uploads.
+		if err := writeJPEG(img, absPath, 90); err != nil {
+			writeJSON(w, http.StatusInternalServerError, M{"error": "file write error"})
+			return
+		}
+	} else {
+		out, err := os.Create(absPath)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, M{"error": "file create error"})
+			return
+		}
+		if _, err := io.Copy(out, file); err != nil {
+			out.Close()
+			writeJSON(w, http.StatusInternalServerError, M{"error": "file write error"})
+			return
+		}
+		out.Close()
 	}
-	io.Copy(out, file)
-	out.Close()
 
 	avatarPath := "/uploads/avatars/" + filename
 	if err := h.q.UpdateUserAvatar(r.Context(), dbq.UpdateUserAvatarParams{
@@ -269,13 +271,44 @@ func (h *MediaHandler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, M{"avatar_path": avatarPath})
 }
 
-func decodeImage(path string) (image.Image, string, error) {
-	f, err := os.Open(path)
+// imageFormats is the allow-list of decodable image formats and the
+// extension / MIME type each is stored and served with.
+var imageFormats = map[string]struct{ ext, mime string }{
+	"jpeg": {".jpg", "image/jpeg"},
+	"png":  {".png", "image/png"},
+	"gif":  {".gif", "image/gif"},
+	"webp": {".webp", "image/webp"},
+}
+
+// maxImagePixels caps Width*Height before a full decode, so a small file
+// claiming enormous dimensions cannot exhaust memory (decompression bomb).
+const maxImagePixels = 50_000_000
+
+// decodeUpload validates the multipart part as a real image and rewinds it
+// for the caller. The format it returns is the only source of truth for the
+// extension and MIME type an upload is stored with.
+func decodeUpload(file multipart.File) (image.Image, string, error) {
+	cfg, _, err := image.DecodeConfig(file)
 	if err != nil {
 		return nil, "", err
 	}
-	defer f.Close()
-	return image.Decode(f)
+	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width*cfg.Height > maxImagePixels {
+		return nil, "", fmt.Errorf("image dimensions out of range: %dx%d", cfg.Width, cfg.Height)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, "", err
+	}
+	img, format, err := image.Decode(file)
+	if err != nil {
+		return nil, "", err
+	}
+	if _, ok := imageFormats[format]; !ok {
+		return nil, "", fmt.Errorf("unsupported format %q", format)
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, "", err
+	}
+	return img, format, nil
 }
 
 func saveThumbnail(img image.Image, path string, maxDim int) error {

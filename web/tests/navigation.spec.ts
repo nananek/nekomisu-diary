@@ -84,3 +84,17 @@ test.describe('PWA assets', () => {
     expect(resp.ok()).toBe(true)
   })
 })
+
+test.describe('Security', () => {
+  test('uploaded files require a session', async ({ request }) => {
+    const resp = await request.get('/uploads/avatars/1.png')
+    expect(resp.status()).toBe(401)
+  })
+
+  test('baseline security headers are set', async ({ request }) => {
+    const resp = await request.get('/manifest.json')
+    expect(resp.headers()['x-content-type-options']).toBe('nosniff')
+    expect(resp.headers()['x-frame-options']).toBe('DENY')
+    expect(resp.headers()['content-security-policy']).toContain("frame-ancestors 'none'")
+  })
+})

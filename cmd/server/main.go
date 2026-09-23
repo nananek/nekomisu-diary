@@ -177,10 +177,11 @@ func main() {
 		mux.Handle("POST /api/auth/avatar", requireAuth(http.HandlerFunc(mediaH.UploadAvatar)))
 	}
 
-	// Static: uploaded media
+	// Static: uploaded media. Uploads are only for members: media may belong
+	// to private/draft posts, and avatars live at predictable URLs.
 	if *uploadsDir != "" {
 		abs, _ := filepath.Abs(*uploadsDir)
-		mux.Handle("GET /uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(abs))))
+		mux.Handle("GET /uploads/", requireAuth(http.StripPrefix("/uploads/", http.FileServer(http.Dir(abs)))))
 		log.Printf("Serving uploads from %s", abs)
 	}
 
@@ -190,12 +191,25 @@ func main() {
 		log.Printf("Serving frontend from %s", *webDir)
 	}
 
-	loggedMux := loggingMiddleware(limitBody(*maxBodyBytes, injectUser(sess, mux)))
+	loggedMux := securityHeaders(loggingMiddleware(limitBody(*maxBodyBytes, injectUser(sess, mux))))
 
 	log.Printf("Listening on %s", *addr)
 	if err := http.ListenAndServe(*addr, loggedMux); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// securityHeaders applies cheap, app-wide browser hardening. CSP is limited
+// to frame-ancestors so it cannot break the SPA's inline styles.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "same-origin")
+		h.Set("Content-Security-Policy", "frame-ancestors 'none'")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func requireAuth(next http.Handler) http.Handler {

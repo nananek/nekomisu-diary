@@ -164,6 +164,15 @@ func (h *PostHandler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
+// validVisibility reports whether v is one of the post_visibility enum values.
+func validVisibility(v string) bool {
+	switch v {
+	case "public", "private", "draft":
+		return true
+	}
+	return false
+}
+
 func (h *PostHandler) Create(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
 	var req struct {
@@ -182,6 +191,10 @@ func (h *PostHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Visibility == "" {
 		req.Visibility = "public"
+	}
+	if !validVisibility(req.Visibility) {
+		writeJSON(w, http.StatusBadRequest, M{"error": "invalid visibility"})
+		return
 	}
 
 	var publishedAt sql.NullTime
@@ -256,6 +269,10 @@ func (h *PostHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	newlyPublic := false
 	if req.Visibility != nil {
+		if !validVisibility(*req.Visibility) {
+			writeJSON(w, http.StatusBadRequest, M{"error": "invalid visibility"})
+			return
+		}
 		if err := h.q.UpdatePostVisibility(ctx, dbq.UpdatePostVisibilityParams{
 			Visibility: *req.Visibility, ID: id,
 		}); err != nil {
