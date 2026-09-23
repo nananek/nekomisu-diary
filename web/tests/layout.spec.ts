@@ -15,6 +15,9 @@ async function login(page: import('@playwright/test').Page) {
   await page.getByPlaceholder('パスワード').fill(PASSWORD)
   await page.getByRole('button', { name: 'ログイン', exact: true }).click()
   await page.waitForURL('/')
+  // waitForURL resolves before React renders the layout; tests that inspect
+  // the DOM (e.g. document order) would race it otherwise.
+  await expect(page.locator('.layout')).toBeVisible()
 }
 
 test.describe('Mobile layout', () => {

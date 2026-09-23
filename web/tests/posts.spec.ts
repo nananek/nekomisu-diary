@@ -110,6 +110,31 @@ test.describe('Posts E2E', () => {
     await expect(page.getByRole('link', { name: title + '_編集後' })).toBeVisible()
   })
 
+  test('nested list items are indented', async ({ page }) => {
+    const title = `リスト_${Date.now()}`
+    const id = await createPost(
+      page.context().request,
+      title,
+      '<ul><li>親<ul><li>子</li><li>子2</li></ul></li></ul><ol><li>一<ol><li>壱</li></ol></li></ol>',
+    )
+    createdIds.push(id)
+
+    await page.goto(`/posts/${id}`)
+    await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible()
+
+    // Read both paddings in a single page evaluation so nothing can be
+    // detached between resolving the element and reading its style.
+    const padding = await page.evaluate(() => {
+      const px = (el: Element | null) => (el ? getComputedStyle(el).paddingLeft : '')
+      return {
+        list: px(document.querySelector('.post-body ul')),
+        nested: px(document.querySelector('.post-body li ul')),
+      }
+    })
+    expect(parseFloat(padding.list)).toBeGreaterThan(20)
+    expect(parseFloat(padding.nested)).toBeGreaterThan(20)
+  })
+
   test('search finds post by title', async ({ page }) => {
     const marker = `search${Date.now()}`
     const id = await createPost(page.context().request, `${marker}タイトル`, '<p>body</p>')

@@ -12,6 +12,10 @@
 .post-body { line-height: 1.8; }
 .post-body img { max-width: 100%; height: auto; border-radius: 4px; margin: 8px 0; }
 .post-body p { margin-bottom: 12px; }
+/* The global reset zeroes list padding, so restore it here (incl. nesting). */
+.post-body ul, .post-body ol { padding-left: 1.6em; margin-bottom: 12px; }
+.post-body li + li { margin-top: 2px; }
+.post-body li > ul, .post-body li > ol { margin-top: 2px; margin-bottom: 0; }
 
 .comments-section h3 { margin-bottom: 12px; }
 
