@@ -176,6 +176,30 @@ func (q *Queries) GetPostForAuthorization(ctx context.Context, id int64) (GetPos
 	return i, err
 }
 
+const getPostForViewer = `-- name: GetPostForViewer :one
+SELECT author_id, visibility, title FROM posts
+WHERE id = $1
+  AND (visibility = 'public' OR author_id = $2)
+`
+
+type GetPostForViewerParams struct {
+	ID       int64
+	ViewerID int64
+}
+
+type GetPostForViewerRow struct {
+	AuthorID   int64
+	Visibility string
+	Title      string
+}
+
+func (q *Queries) GetPostForViewer(ctx context.Context, arg GetPostForViewerParams) (GetPostForViewerRow, error) {
+	row := q.db.QueryRowContext(ctx, getPostForViewer, arg.ID, arg.ViewerID)
+	var i GetPostForViewerRow
+	err := row.Scan(&i.AuthorID, &i.Visibility, &i.Title)
+	return i, err
+}
+
 const listDrafts = `-- name: ListDrafts :many
 SELECT p.id, p.author_id, u.display_name AS author_name, u.avatar_path AS author_avatar,
        p.title, p.body_html, p.visibility,

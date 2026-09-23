@@ -53,17 +53,6 @@ func (q *Queries) DeleteComment(ctx context.Context, arg DeleteCommentParams) (i
 	return result.RowsAffected()
 }
 
-const getPostTitle = `-- name: GetPostTitle :one
-SELECT title FROM posts WHERE id = $1
-`
-
-func (q *Queries) GetPostTitle(ctx context.Context, id int64) (string, error) {
-	row := q.db.QueryRowContext(ctx, getPostTitle, id)
-	var title string
-	err := row.Scan(&title)
-	return title, err
-}
-
 const listComments = `-- name: ListComments :many
 SELECT c.id, c.post_id, c.author_id,
        COALESCE(u.display_name, c.author_name, 'Anonymous') AS author_name,

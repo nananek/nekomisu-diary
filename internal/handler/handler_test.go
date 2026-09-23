@@ -543,6 +543,50 @@ func TestComments_Delete_OtherUserForbidden(t *testing.T) {
 	}
 }
 
+// Comments inherit their post's visibility. Post IDs are sequential, so
+// "you'd have to know the ID" is no protection at all.
+func TestComments_HiddenPost_NotVisibleToOthers(t *testing.T) {
+	h := newHarness(t)
+	_, aliceCookie := h.createUser(t, "alice", "password")
+	_, bobCookie := h.createUser(t, "bob", "password")
+
+	for _, visibility := range []string{"private", "draft"} {
+		resp := h.req(t, "POST", "/api/posts", map[string]string{
+			"title": "Hidden " + visibility, "body": "<p>x</p>", "visibility": visibility,
+		}, aliceCookie)
+		if resp.StatusCode != 201 {
+			t.Fatalf("%s: create: %d", visibility, resp.StatusCode)
+		}
+		var created map[string]any
+		decode(t, resp, &created)
+		pid := int64(created["id"].(float64))
+
+		// The author can read and write comments on her own hidden post.
+		resp = h.req(t, "POST", "/api/posts/"+itoa(pid)+"/comments", map[string]string{"body": "自分用メモ"}, aliceCookie)
+		if resp.StatusCode != 201 {
+			t.Errorf("%s: owner cannot comment: %d", visibility, resp.StatusCode)
+		}
+		resp = h.req(t, "GET", "/api/posts/"+itoa(pid)+"/comments", nil, aliceCookie)
+		var own struct {
+			Comments []map[string]any `json:"comments"`
+		}
+		decode(t, resp, &own)
+		if len(own.Comments) != 1 {
+			t.Errorf("%s: owner comment list: got %d want 1", visibility, len(own.Comments))
+		}
+
+		// Others can neither read nor write comments, even knowing the ID.
+		resp = h.req(t, "GET", "/api/posts/"+itoa(pid)+"/comments", nil, bobCookie)
+		if resp.StatusCode != 404 {
+			t.Errorf("%s: other user can list comments: got %d want 404", visibility, resp.StatusCode)
+		}
+		resp = h.req(t, "POST", "/api/posts/"+itoa(pid)+"/comments", map[string]string{"body": "sneak"}, bobCookie)
+		if resp.StatusCode != 404 {
+			t.Errorf("%s: other user can comment: got %d want 404", visibility, resp.StatusCode)
+		}
+	}
+}
+
 // --- Members tests ---
 
 func TestMembers_List(t *testing.T) {

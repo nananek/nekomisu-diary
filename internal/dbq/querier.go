@@ -34,7 +34,7 @@ type Querier interface {
 	GetMisskeyLink(ctx context.Context, arg GetMisskeyLinkParams) (GetMisskeyLinkRow, error)
 	GetPost(ctx context.Context, arg GetPostParams) (GetPostRow, error)
 	GetPostForAuthorization(ctx context.Context, id int64) (GetPostForAuthorizationRow, error)
-	GetPostTitle(ctx context.Context, id int64) (string, error)
+	GetPostForViewer(ctx context.Context, arg GetPostForViewerParams) (GetPostForViewerRow, error)
 	GetReadMarker(ctx context.Context, userID int64) (time.Time, error)
 	GetSession(ctx context.Context, arg GetSessionParams) (GetSessionRow, error)
 	GetUnverifiedTOTPSecret(ctx context.Context, userID int64) (string, error)

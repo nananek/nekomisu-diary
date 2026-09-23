@@ -35,7 +35,17 @@ type commentJSON struct {
 }
 
 func (h *CommentHandler) List(w http.ResponseWriter, r *http.Request) {
+	u := UserFromContext(r.Context())
 	postID, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+
+	// Comments inherit the post's visibility: without this check anyone
+	// could enumerate IDs and read comments on private/draft posts.
+	if _, err := h.q.GetPostForViewer(r.Context(), dbq.GetPostForViewerParams{
+		ID: postID, ViewerID: u.UserID,
+	}); err != nil {
+		writeJSON(w, http.StatusNotFound, M{"error": "post not found"})
+		return
+	}
 
 	rows, err := h.q.ListComments(r.Context(), postID)
 	if err != nil {
@@ -69,7 +79,9 @@ func (h *CommentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
 	postID, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 
-	postTitle, err := h.q.GetPostTitle(r.Context(), postID)
+	post, err := h.q.GetPostForViewer(r.Context(), dbq.GetPostForViewerParams{
+		ID: postID, ViewerID: u.UserID,
+	})
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, M{"error": "post not found"})
 		return
@@ -99,7 +111,7 @@ func (h *CommentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.notifier != nil {
-		h.notifier.NotifyComment(postID, id, postTitle, u.DisplayName, req.Body)
+		h.notifier.NotifyComment(postID, id, post.Title, u.DisplayName, req.Body)
 	}
 	writeJSON(w, http.StatusCreated, M{"id": id})
 }

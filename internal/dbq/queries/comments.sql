@@ -15,6 +15,3 @@ RETURNING id;
 
 -- name: DeleteComment :execrows
 DELETE FROM comments WHERE id = $1 AND author_id = $2;
-
--- name: GetPostTitle :one
-SELECT title FROM posts WHERE id = $1;

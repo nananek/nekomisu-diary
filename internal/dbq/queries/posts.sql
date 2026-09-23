@@ -14,6 +14,11 @@ WHERE p.id = $1
 -- name: GetPostForAuthorization :one
 SELECT author_id, visibility, title FROM posts WHERE id = $1;
 
+-- name: GetPostForViewer :one
+SELECT author_id, visibility, title FROM posts
+WHERE id = sqlc.arg(id)
+  AND (visibility = 'public' OR author_id = sqlc.arg(viewer_id));
+
 -- name: ListPosts :many
 SELECT p.id, p.author_id, u.display_name AS author_name, u.avatar_path AS author_avatar,
        p.title, p.body_html, p.visibility,
