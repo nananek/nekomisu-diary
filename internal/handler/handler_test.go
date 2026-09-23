@@ -693,6 +693,54 @@ func TestMedia_Upload_StoresByDecodedFormat(t *testing.T) {
 	}
 }
 
+// --- Security headers ---
+
+func TestSecurityHeaders(t *testing.T) {
+	called := false
+	h := handler.SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	}))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	if !called {
+		t.Fatal("next handler was not called")
+	}
+
+	if got := rec.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options: got %q", got)
+	}
+	if got := rec.Header().Get("X-Frame-Options"); got != "DENY" {
+		t.Errorf("X-Frame-Options: got %q", got)
+	}
+	if got := rec.Header().Get("Referrer-Policy"); got != "same-origin" {
+		t.Errorf("Referrer-Policy: got %q", got)
+	}
+
+	csp := rec.Header().Get("Content-Security-Policy")
+	for _, want := range []string{
+		"default-src 'self'",
+		"script-src 'self'",
+		"script-src-attr 'none'",
+		"style-src 'self'",
+		"style-src-attr 'unsafe-inline'",
+		"img-src 'self' data: https:",
+		"connect-src 'self'",
+		"object-src 'none'",
+		"base-uri 'none'",
+		"form-action 'self'",
+		"frame-ancestors 'none'",
+		"worker-src 'self'",
+	} {
+		if !strings.Contains(csp, want) {
+			t.Errorf("CSP missing %q in %q", want, csp)
+		}
+	}
+	if strings.Contains(csp, "unsafe-eval") {
+		t.Errorf("CSP allows eval: %q", csp)
+	}
+}
+
 // --- Comments tests ---
 
 func TestComments_CreateListDelete(t *testing.T) {

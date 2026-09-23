@@ -95,6 +95,60 @@ test.describe('Security', () => {
     const resp = await request.get('/manifest.json')
     expect(resp.headers()['x-content-type-options']).toBe('nosniff')
     expect(resp.headers()['x-frame-options']).toBe('DENY')
-    expect(resp.headers()['content-security-policy']).toContain("frame-ancestors 'none'")
+    const csp = resp.headers()['content-security-policy']
+    expect(csp).toContain("default-src 'self'")
+    expect(csp).toContain("script-src 'self'")
+    expect(csp).toContain("script-src-attr 'none'")
+    expect(csp).toContain("connect-src 'self'")
+    expect(csp).toContain("frame-ancestors 'none'")
+  })
+
+  test('app pages load without CSP violations', async ({ page }) => {
+    await page.addInitScript(() => {
+      const w = window as unknown as { __cspViolations: string[] }
+      w.__cspViolations = []
+      document.addEventListener('securitypolicyviolation', e => {
+        w.__cspViolations.push(`${e.violatedDirective} ${e.blockedURI}`)
+      })
+    })
+    const collect = () =>
+      page.evaluate(() => (window as unknown as { __cspViolations?: string[] }).__cspViolations ?? [])
+
+    // Login page first (its document is replaced once we log in).
+    await page.goto('/login')
+    await expect(page.getByPlaceholder('ログインID')).toBeVisible()
+    const violations: string[] = [...await collect()]
+
+    await loginUI(page)
+    for (const path of ['/', '/new', '/search', '/drafts', '/members', '/media', '/settings']) {
+      await page.goto(path)
+      await expect(page.locator('.layout')).toBeVisible()
+      violations.push(...await collect())
+    }
+
+    // Post detail page (sanitized body + comments section).
+    const created = await page.context().request.post('/api/posts', {
+      data: { title: `CSP_${Date.now()}`, body: '<p>x</p>', visibility: 'public' },
+    })
+    const postID = (await created.json()).id
+    await page.goto(`/posts/${postID}`)
+    await expect(page.locator('.post-view')).toBeVisible()
+    violations.push(...await collect())
+    await page.context().request.delete(`/api/posts/${postID}`)
+
+    expect(violations).toEqual([])
+  })
+
+  test('CSP blocks injected inline script', async ({ page }) => {
+    await loginUI(page)
+    const ran = await page.evaluate(() => {
+      const w = window as unknown as { __cspInlineRan?: boolean }
+      const s = document.createElement('script')
+      s.textContent = 'window.__cspInlineRan = true'
+      document.body.appendChild(s)
+      s.remove()
+      return w.__cspInlineRan === true
+    })
+    expect(ran).toBe(false)
   })
 })

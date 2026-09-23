@@ -29,6 +29,11 @@ self.addEventListener('fetch', (event) => {
   // Skip non-GET requests
   if (request.method !== 'GET') return
 
+  // Cross-origin requests: let the browser fetch them directly. Proxying
+  // third-party content through the worker would be subject to its own
+  // connect-src 'self' CSP (and would cache other people's images).
+  if (url.origin !== self.location.origin) return
+
   // API calls: network-only
   if (url.pathname.startsWith('/api/')) return
 

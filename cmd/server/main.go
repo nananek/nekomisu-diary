@@ -191,25 +191,12 @@ func main() {
 		log.Printf("Serving frontend from %s", *webDir)
 	}
 
-	loggedMux := securityHeaders(loggingMiddleware(limitBody(*maxBodyBytes, injectUser(sess, mux))))
+	loggedMux := handler.SecurityHeaders(loggingMiddleware(limitBody(*maxBodyBytes, injectUser(sess, mux))))
 
 	log.Printf("Listening on %s", *addr)
 	if err := http.ListenAndServe(*addr, loggedMux); err != nil {
 		log.Fatal(err)
 	}
-}
-
-// securityHeaders applies cheap, app-wide browser hardening. CSP is limited
-// to frame-ancestors so it cannot break the SPA's inline styles.
-func securityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("X-Frame-Options", "DENY")
-		h.Set("Referrer-Policy", "same-origin")
-		h.Set("Content-Security-Policy", "frame-ancestors 'none'")
-		next.ServeHTTP(w, r)
-	})
 }
 
 func requireAuth(next http.Handler) http.Handler {
