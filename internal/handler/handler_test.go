@@ -3,6 +3,7 @@ package handler_test
 import (
 	"bytes"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"image"
 	"image/gif"
@@ -153,6 +154,16 @@ func gifBytes(t *testing.T) []byte {
 		t.Fatalf("gif encode: %v", err)
 	}
 	return buf.Bytes()
+}
+
+// webpBytes is a 1x1 lossless WebP.
+func webpBytes(t *testing.T) []byte {
+	t.Helper()
+	b, err := base64.StdEncoding.DecodeString("UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA")
+	if err != nil {
+		t.Fatalf("webp base64: %v", err)
+	}
+	return b
 }
 
 func storedFiles(t *testing.T, dir string) []string {
@@ -395,7 +406,9 @@ func TestPosts_PrivatePost_NotVisibleToOthers(t *testing.T) {
 
 	// Bob's list doesn't include it
 	resp = h.req(t, "GET", "/api/posts", nil, bobCookie)
-	var list struct{ Total int `json:"total"` }
+	var list struct {
+		Total int `json:"total"`
+	}
 	decode(t, resp, &list)
 	if list.Total != 0 {
 		t.Errorf("bob sees alice's private post in list: total=%d", list.Total)
@@ -651,9 +664,20 @@ func TestMedia_Upload_StoresByDecodedFormat(t *testing.T) {
 		t.Errorf("stored gif url %q does not end in .gif", url)
 	}
 
+	resp = h.upload(t, "/api/media/upload", "file", "picture.html", "image/png", webpBytes(t), cookie)
+	if resp.StatusCode != 201 {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("webp upload: got %d (%s)", resp.StatusCode, body)
+	}
+	var webpCreated map[string]any
+	decode(t, resp, &webpCreated)
+	if url, _ := webpCreated["url"].(string); !strings.HasSuffix(url, ".webp") {
+		t.Errorf("stored webp url %q does not end in .webp", url)
+	}
+
 	files := storedFiles(t, h.uploadsDir)
-	if len(files) != 4 {
-		t.Fatalf("expected 4 stored files (png, thumbnail, avatar, gif), got %v", files)
+	if len(files) != 5 {
+		t.Fatalf("expected 5 stored files (png, thumbnail, avatar, gif, webp), got %v", files)
 	}
 	pngs := 0
 	for _, f := range files {
@@ -811,4 +835,3 @@ func TestMembers_List(t *testing.T) {
 		}
 	}
 }
-
