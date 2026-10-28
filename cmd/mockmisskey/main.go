@@ -58,15 +58,24 @@ func main() {
 			http.Error(w, "missing callback", http.StatusBadRequest)
 			return
 		}
-		mu.Lock()
-		approved[token] = approval{id: id, username: *username}
-		mu.Unlock()
-
+		// The callback comes straight off the query string, so it has to be
+		// constrained before the browser is sent there: without this the mock
+		// is an open redirector for anyone who can get a browser to load
+		// /miauth/{token}?callback=https://elsewhere.example. Only the diary
+		// running on this machine (what e2e starts) is ever a valid target.
 		u, err := url.Parse(callback)
-		if err != nil {
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 			http.Error(w, "bad callback", http.StatusBadRequest)
 			return
 		}
+		if u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" && u.Hostname() != "::1" {
+			http.Error(w, "bad callback", http.StatusBadRequest)
+			return
+		}
+
+		mu.Lock()
+		approved[token] = approval{id: id, username: *username}
+		mu.Unlock()
 		q := u.Query()
 		q.Set("session", token)
 		u.RawQuery = q.Encode()
@@ -115,7 +124,9 @@ func main() {
 
 func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("mockmisskey: %s %s", r.Method, r.URL)
+		// %q escapes control characters, so a crafted request line can't forge
+		// extra log entries (CWE-117).
+		log.Printf("mockmisskey: %q %q", r.Method, r.URL.String())
 		next.ServeHTTP(w, r)
 	})
 }
