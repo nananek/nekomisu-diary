@@ -16,6 +16,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sync"
 )
 
@@ -23,6 +24,12 @@ type approval struct {
 	id       string
 	username string
 }
+
+// localCallback matches the one redirect target this mock accepts: the
+// diary's own callback URL on this machine. Scheme and host are matched as
+// one anchored prefix, so near misses — http://localhost@evil.example,
+// //evil.example, http://localhost.evil.example — don't get through.
+var localCallback = regexp.MustCompile(`^https?://(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(/|$)`)
 
 func main() {
 	addr := flag.String("addr", ":3001", "listen address")
@@ -62,13 +69,14 @@ func main() {
 		// constrained before the browser is sent there: without this the mock
 		// is an open redirector for anyone who can get a browser to load
 		// /miauth/{token}?callback=https://elsewhere.example. Only the diary
-		// running on this machine (what e2e starts) is ever a valid target.
-		u, err := url.Parse(callback)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		// running on this machine — what e2e starts on localhost:3000 — is
+		// ever a valid target.
+		if !localCallback.MatchString(callback) {
 			http.Error(w, "bad callback", http.StatusBadRequest)
 			return
 		}
-		if u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" && u.Hostname() != "::1" {
+		u, err := url.Parse(callback)
+		if err != nil {
 			http.Error(w, "bad callback", http.StatusBadRequest)
 			return
 		}
