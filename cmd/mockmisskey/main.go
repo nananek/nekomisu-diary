@@ -16,6 +16,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sync"
 )
 
@@ -23,6 +24,12 @@ type approval struct {
 	id       string
 	username string
 }
+
+// localCallback matches the one redirect target this mock accepts: the
+// diary's own callback URL on this machine. Scheme and host are matched as
+// one anchored prefix, so near misses — http://localhost@evil.example,
+// //evil.example, http://localhost.evil.example — don't get through.
+var localCallback = regexp.MustCompile(`^https?://(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(/|$)`)
 
 func main() {
 	addr := flag.String("addr", ":3001", "listen address")
@@ -58,15 +65,25 @@ func main() {
 			http.Error(w, "missing callback", http.StatusBadRequest)
 			return
 		}
-		mu.Lock()
-		approved[token] = approval{id: id, username: *username}
-		mu.Unlock()
-
+		// The callback comes straight off the query string, so it has to be
+		// constrained before the browser is sent there: without this the mock
+		// is an open redirector for anyone who can get a browser to load
+		// /miauth/{token}?callback=https://elsewhere.example. Only the diary
+		// running on this machine — what e2e starts on localhost:3000 — is
+		// ever a valid target.
+		if !localCallback.MatchString(callback) {
+			http.Error(w, "bad callback", http.StatusBadRequest)
+			return
+		}
 		u, err := url.Parse(callback)
 		if err != nil {
 			http.Error(w, "bad callback", http.StatusBadRequest)
 			return
 		}
+
+		mu.Lock()
+		approved[token] = approval{id: id, username: *username}
+		mu.Unlock()
 		q := u.Query()
 		q.Set("session", token)
 		u.RawQuery = q.Encode()
@@ -115,7 +132,9 @@ func main() {
 
 func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("mockmisskey: %s %s", r.Method, r.URL)
+		// %q escapes control characters, so a crafted request line can't forge
+		// extra log entries (CWE-117).
+		log.Printf("mockmisskey: %q %q", r.Method, r.URL.String())
 		next.ServeHTTP(w, r)
 	})
 }
